@@ -274,7 +274,9 @@ class OpenCodeModelManager(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle(APP_NAME)
-        self.setMinimumSize(1120, 760)
+        self.setMinimumSize(980, 560)
+        self.resize(1120, 720)
+        self._fit_to_screen()
 
         self.settings = QSettings("OpenCodeTools", "OpenCodeModelManager")
         use_global = self.settings.value("use_global", True, type=bool)
@@ -290,13 +292,29 @@ class OpenCodeModelManager(QMainWindow):
         self.apply_style()
         self.load_config()
 
+    def _fit_to_screen(self):
+        """Ajusta el tamaño inicial al área disponible del monitor.
+
+        Evita que la barra de título quede fuera de la pantalla en
+        monitores pequeños: la ventana nunca pide más alto o ancho que
+        el área libre del escritorio (sin paneles ni barras).
+        """
+        screen = QApplication.primaryScreen()
+        if screen is None:
+            return
+        available = screen.availableGeometry()
+        width = min(self.width(), available.width())
+        height = min(self.height(), available.height())
+        if (width, height) != (self.width(), self.height()):
+            self.resize(width, height)
+
     def build_ui(self):
         central = QWidget()
         self.setCentralWidget(central)
 
         main = QHBoxLayout(central)
-        main.setContentsMargins(18, 18, 18, 18)
-        main.setSpacing(14)
+        main.setContentsMargins(12, 12, 12, 12)
+        main.setSpacing(10)
 
         # ---------- LEFT ----------
         left = QWidget()
@@ -335,7 +353,7 @@ class OpenCodeModelManager(QMainWindow):
         left_layout.addLayout(top_buttons)
 
         self.models_list = QListWidget()
-        self.models_list.setSpacing(5)
+        self.models_list.setSpacing(2)
         self.models_list.itemSelectionChanged.connect(self.selection_changed)
         left_layout.addWidget(self.models_list)
 
@@ -399,7 +417,6 @@ class OpenCodeModelManager(QMainWindow):
         left_layout.addWidget(default_group)
 
         self.save_btn = QPushButton("Guardar cambios")
-        self.save_btn.setMinimumHeight(44)
         self.save_btn.clicked.connect(self.save_config)
         left_layout.addWidget(self.save_btn)
 
@@ -495,8 +512,8 @@ class OpenCodeModelManager(QMainWindow):
                 font-weight: bold;
                 border: 1px solid #dcdde1;
                 border-radius: 8px;
-                margin-top: 10px;
-                padding-top: 10px;
+                margin-top: 8px;
+                padding-top: 8px;
                 background: #ffffff;
             }
             QGroupBox::title {
@@ -509,13 +526,13 @@ class OpenCodeModelManager(QMainWindow):
                 background: #ffffff;
                 border: 1px solid #dcdde1;
                 border-radius: 8px;
-                padding: 8px;
+                padding: 6px;
                 font-size: 13px;
             }
             QListWidget::item {
-                padding: 10px;
+                padding: 5px 10px;
                 border-radius: 6px;
-                margin-bottom: 4px;
+                margin-bottom: 2px;
             }
             QListWidget::item:selected {
                 background: #0984e3;
@@ -526,7 +543,7 @@ class OpenCodeModelManager(QMainWindow):
                 color: white;
                 border: none;
                 border-radius: 6px;
-                padding: 8px 13px;
+                padding: 4px 10px;
                 font-weight: bold;
             }
             QPushButton:hover { background: #0770c2; }
@@ -538,12 +555,12 @@ class OpenCodeModelManager(QMainWindow):
                 background: #2d3436;
                 color: #dfe6e9;
                 border-radius: 6px;
-                padding: 10px;
+                padding: 6px;
             }
             QLineEdit, QComboBox {
                 border: 1px solid #dcdde1;
                 border-radius: 4px;
-                padding: 6px;
+                padding: 4px 6px;
             }
         """)
         self.save_btn.setStyleSheet(

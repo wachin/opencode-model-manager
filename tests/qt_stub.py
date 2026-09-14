@@ -137,6 +137,15 @@ class QMainWindow(QWidget):
     def setMinimumSize(self, w: int, h: int) -> None:
         self._minimum_size = (w, h)
 
+    def resize(self, w: int, h: int) -> None:
+        self._size = (w, h)
+
+    def width(self) -> int:
+        return getattr(self, "_size", (0, 0))[0]
+
+    def height(self) -> int:
+        return getattr(self, "_size", (0, 0))[1]
+
     def setStyleSheet(self, sheet: str) -> None:
         self._style_sheet = sheet
 
@@ -474,6 +483,10 @@ class QSplitter(QWidget):
 
 
 class QApplication:
+    @staticmethod
+    def primaryScreen() -> Any:
+        return None
+
     @staticmethod
     def exec() -> int:
         return 0
