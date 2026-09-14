@@ -93,7 +93,7 @@ cómodamente:
 }
 ```
 
-El flujo completo es:
+El flujo completo es (como ejemplo ya que caducan con frecuencia y aparecen otras):
 
 ```
 Linux o Android/Termux
