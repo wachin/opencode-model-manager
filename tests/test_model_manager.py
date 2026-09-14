@@ -81,6 +81,26 @@ def _load_config_silent(window: omm.OpenCodeModelManager) -> None:
     window.load_config()
 
 
+class _FakeEvent:
+    """Sustituto mínimo de QCloseEvent para closeEvent()."""
+
+    def __init__(self) -> None:
+        self.accepted = False
+
+    def accept(self) -> None:
+        self.accepted = True
+
+
+class _FakeScreen:
+    """Sustituto mínimo de QScreen para _fit_to_screen()."""
+
+    def __init__(self, rect: "qt_stub.QRect") -> None:
+        self._rect = rect
+
+    def availableGeometry(self) -> "qt_stub.QRect":
+        return self._rect
+
+
 # ------------------------------------------------------------------
 # Parte 2: migración "providers" -> "provider"
 # ------------------------------------------------------------------
@@ -352,6 +372,109 @@ class TestGlobalMode(unittest.TestCase):
 
         self.assertEqual(fired, [], "No debe disparar stateChanged")
         self.assertTrue(box.isChecked())
+
+
+# ------------------------------------------------------------------
+# Geometría de ventana: recordar entre sesiones
+# ------------------------------------------------------------------
+
+class TestWindowGeometry(unittest.TestCase):
+    """_restore_window_geometry() / _fit_to_screen() / closeEvent()."""
+
+    def setUp(self) -> None:
+        qt_stub.QSettings.reset()
+        qt_stub.QMessageBox.reset()
+        self.addCleanup(self._cleanup)
+
+    def _cleanup(self) -> None:
+        qt_stub.QSettings.reset()
+        qt_stub.QMessageBox.reset()
+
+    def _make_window(self) -> omm.OpenCodeModelManager:
+        window = object.__new__(omm.OpenCodeModelManager)
+        window.settings = qt_stub.QSettings(
+            "OpenCodeTools", "OpenCodeModelManager"
+        )
+        window.use_global = True
+        window.config_path = Path(tempfile.mkdtemp()) / "opencode.json"
+        window.data = {}
+        window.models = []
+        window.refresh = lambda: None
+        window.statusBar = lambda: _StatusBarRecorder()
+        return window
+
+    def test_close_event_saves_geometry(self):
+        """Al cerrar, la geometría queda en QSettings."""
+        window = self._make_window()
+        window.resize(1000, 650)
+        window.move(40, 30)
+
+        window.closeEvent(_FakeEvent())
+
+        settings = qt_stub.QSettings(
+            "OpenCodeTools", "OpenCodeModelManager"
+        )
+        self.assertTrue(settings.contains("geometry"))
+
+    def test_geometry_round_trip(self):
+        """Cerrar y reabrir recupera tamaño y posición guardados."""
+        # --- Sesión 1: mover/redimensionar y cerrar. ---
+        window = self._make_window()
+        window.resize(1044, 688)
+        window.move(33, 44)
+        window.closeEvent(_FakeEvent())
+
+        # --- Sesión 2: nueva instancia restaura la geometría. ---
+        window2 = self._make_window()
+        window2._restore_window_geometry()
+        self.assertEqual((window2.width(), window2.height()), (1044, 688))
+        self.assertEqual((window2.x(), window2.y()), (33, 44))
+
+    def test_restore_without_saved_geometry_keeps_defaults(self):
+        """Sin geometría guardada se conserva el tamaño por defecto."""
+        window = self._make_window()
+        window.resize(1120, 720)
+        window._restore_window_geometry()
+        self.assertEqual((window.width(), window.height()), (1120, 720))
+
+    def test_restore_with_corrupt_geometry_does_not_crash(self):
+        """Geometría corrupta: se ignora sin excepción."""
+        settings = qt_stub.QSettings(
+            "OpenCodeTools", "OpenCodeModelManager"
+        )
+        settings.setValue("geometry", b"\xff\x00not-a-geometry")
+
+        window = self._make_window()
+        window.resize(1120, 720)
+        window._restore_window_geometry()  # no debe lanzar
+        self.assertEqual((window.width(), window.height()), (1120, 720))
+
+    def test_restored_geometry_clamped_to_screen(self):
+        """Una geometría de un monitor grande no puede salir de pantalla.
+
+        Simula: ventana guardada en (0, 4000) con alto 900; el monitor
+        actual es de 1366x768 con paneles, así que el área útil
+        disponible es de 1366x708. El alto se recorta al área y la Y se
+        reencuadra para que la barra de título quede visible.
+        """
+        available = qt_stub.QRect(x=0, y=0, width=1366, height=708)
+        original = qt_stub.QApplication.primaryScreen
+        qt_stub.QApplication.primaryScreen = lambda: _FakeScreen(available)
+        self.addCleanup(
+            lambda: setattr(
+                qt_stub.QApplication, "primaryScreen", original
+            )
+        )
+
+        window = self._make_window()
+        window.resize(1120, 900)
+        window.move(0, 4000)
+        window._fit_to_screen(clamp_position=True)
+
+        self.assertEqual(window.height(), 708)   # alto <= área útil
+        self.assertLessEqual(window.y(), available.bottom() - 40)
+        self.assertGreaterEqual(window.y(), available.top())
+        self.assertLessEqual(window.width(), available.width())
 
 
 # ------------------------------------------------------------------

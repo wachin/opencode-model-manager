@@ -113,6 +113,47 @@ class Signal:
 # QtWidgets
 # ---------------------------------------------------------------------------
 
+class QRect:
+    """Rectángulo mínimo con la misma API que QRect de Qt real:
+    todos los accesores son métodos (width(), left(), right(), ...)."""
+
+    def __init__(
+        self,
+        x: int = 0,
+        y: int = 0,
+        width: int = 0,
+        height: int = 0,
+    ) -> None:
+        self._x = x
+        self._y = y
+        self._width = width
+        self._height = height
+
+    def x(self) -> int:
+        return self._x
+
+    def y(self) -> int:
+        return self._y
+
+    def width(self) -> int:
+        return self._width
+
+    def height(self) -> int:
+        return self._height
+
+    def left(self) -> int:
+        return self._x
+
+    def top(self) -> int:
+        return self._y
+
+    def right(self) -> int:
+        return self._x + self._width - 1
+
+    def bottom(self) -> int:
+        return self._y + self._height - 1
+
+
 class QWidget:
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         pass
@@ -145,6 +186,32 @@ class QMainWindow(QWidget):
 
     def height(self) -> int:
         return getattr(self, "_size", (0, 0))[1]
+
+    def move(self, x: int, y: int) -> None:
+        self._pos = (x, y)
+
+    def x(self) -> int:
+        return getattr(self, "_pos", (0, 0))[0]
+
+    def y(self) -> int:
+        return getattr(self, "_pos", (0, 0))[1]
+
+    def saveGeometry(self) -> bytes:
+        """Serializa tamaño y posición actuales (formato propio del stub)."""
+        return f"{self.width()},{self.height()},{self.x()},{self.y()}".encode(
+            "ascii"
+        )
+
+    def restoreGeometry(self, geometry: Any) -> bool:
+        """Restaura la geometría serializada por saveGeometry() del stub."""
+        try:
+            raw = bytes(geometry)
+            w, h, x, y = raw.decode("ascii").split(",")
+            self.resize(int(w), int(h))
+            self.move(int(x), int(y))
+            return True
+        except Exception:
+            return False
 
     def setStyleSheet(self, sheet: str) -> None:
         self._style_sheet = sheet
@@ -573,6 +640,7 @@ def install(force: bool = False) -> None:
 
     QtGui = types.ModuleType("PyQt6.QtGui")
     QtGui.QFont = QFont
+    QtGui.QRect = QRect
     QtGui.QKeySequence = QKeySequence
     QtGui.QShortcut = QShortcut
 

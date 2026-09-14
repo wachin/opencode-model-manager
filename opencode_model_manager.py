@@ -12,6 +12,7 @@ Características:
 - Permite configurar "small_model".
 - Conserva propiedades adicionales de cada modelo.
 - Hace una copia de seguridad antes de guardar.
+- Recuerda el tamaño y la posición de la ventana entre sesiones.
 - Puede abrir un opencode.json existente mediante un selector.
 - Detecta automáticamente:
     1. OPENCODE_CONFIG
@@ -279,6 +280,8 @@ class OpenCodeModelManager(QMainWindow):
         self._fit_to_screen()
 
         self.settings = QSettings("OpenCodeTools", "OpenCodeModelManager")
+        self._restore_window_geometry()
+
         use_global = self.settings.value("use_global", True, type=bool)
         self.use_global = use_global
         self.config_path = (
@@ -292,12 +295,16 @@ class OpenCodeModelManager(QMainWindow):
         self.apply_style()
         self.load_config()
 
-    def _fit_to_screen(self):
-        """Ajusta el tamaño inicial al área disponible del monitor.
+    def _fit_to_screen(self, clamp_position=False):
+        """Ajusta tamaño y posición al área disponible del monitor.
 
         Evita que la barra de título quede fuera de la pantalla en
         monitores pequeños: la ventana nunca pide más alto o ancho que
         el área libre del escritorio (sin paneles ni barras).
+
+        Con clamp_position=True (usado al restaurar una geometría
+        guardada) también reencuadra la posición, por si la ventana se
+        guardó en un monitor o resolución que ya no existe.
         """
         screen = QApplication.primaryScreen()
         if screen is None:
@@ -307,6 +314,33 @@ class OpenCodeModelManager(QMainWindow):
         height = min(self.height(), available.height())
         if (width, height) != (self.width(), self.height()):
             self.resize(width, height)
+        if clamp_position:
+            x = min(
+                max(self.x(), available.left()),
+                available.right() - 120,
+            )
+            y = min(
+                max(self.y(), available.top()),
+                available.bottom() - 40,
+            )
+            if (x, y) != (self.x(), self.y()):
+                self.move(x, y)
+
+    def _restore_window_geometry(self):
+        """Restaura tamaño y posición guardados en la sesión anterior.
+
+        Si no hay geometría guardada (o está corrupta) se conserva la
+        que acaba de definirse en __init__. En ambos casos se reencuadra
+        al área disponible del monitor actual.
+        """
+        geometry = self.settings.value("geometry")
+        restored = False
+        if geometry is not None:
+            try:
+                restored = self.restoreGeometry(geometry)
+            except Exception:
+                restored = False
+        self._fit_to_screen(clamp_position=restored)
 
     def build_ui(self):
         central = QWidget()
@@ -1082,6 +1116,8 @@ class OpenCodeModelManager(QMainWindow):
         )
 
     def closeEvent(self, event):
+        """Guarda tamaño y posición de la ventana para la próxima sesión."""
+        self.settings.setValue("geometry", self.saveGeometry())
         event.accept()
 
 
