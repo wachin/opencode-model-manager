@@ -56,6 +56,43 @@ except ImportError:
 
 APP_NAME = "OpenCode Model Manager"
 SCHEMA_URL = "https://opencode.ai/config.json"
+LSP_SERVER_HINTS = {
+    "python": "pyright",
+}
+
+
+def lsp_server_installed(server: str) -> bool:
+    """True si el ejecutable del servidor LSP está en el PATH."""
+    return shutil.which(server) is not None
+
+
+def lsp_languages(data: dict) -> list[str]:
+    """Lenguajes declarados en la configuración de OpenCode.
+
+    Lee "language servers" del propio opencode.json (formato de
+    OpenCode: {"python": "pyright", ...}) y añade "python" como
+    mínimo, porque es el lenguaje de los proyectos habituales.
+    """
+    languages: set[str] = {"python"}
+    servers = data.get("language servers")
+    if isinstance(servers, dict):
+        for lang in servers:
+            languages.add(str(lang).lower())
+    return sorted(languages)
+
+
+def missing_lsp_servers(languages: list[str]) -> list[str]:
+    """Servidores LSP de la configuración que no están instalados.
+
+    Mapea cada lenguaje (p. ej. "python") a su servidor recomendado
+    (LSP_SERVER_HINTS) y comprueba si el ejecutable está en el PATH.
+    """
+    missing = []
+    for lang in languages:
+        server = LSP_SERVER_HINTS.get(str(lang).lower())
+        if server and not lsp_server_installed(server):
+            missing.append(server)
+    return missing
 
 
 def global_config_path():
@@ -388,7 +425,7 @@ class OpenCodeModelManager(QMainWindow):
         self.lsp_check.setToolTip(
             "Activa o desactiva los servidores LSP de OpenCode (clave \"lsp\"\n"
             "de opencode.json). Requiere tener instalado el servidor del\n"
-            "lenguaje, por ejemplo: npm install -g pyright"
+            "lenguaje; para Python: npm install -g pyright"
         )
         self.lsp_check.stateChanged.connect(self.toggle_lsp)
         top_buttons.addWidget(self.lsp_check)
@@ -539,6 +576,23 @@ class OpenCodeModelManager(QMainWindow):
         """Activa o desactiva la clave "lsp" de opencode.json."""
         enabled = state == Qt.CheckState.Checked.value
         if enabled:
+            missing = missing_lsp_servers(lsp_languages(self.data))
+            if missing:
+                unique = sorted(set(missing))
+                cmds = "\n".join(
+                    f"  • {s}  →  npm install -g {s}"
+                    for s in unique
+                )
+                QMessageBox.warning(
+                    self,
+                    "Servidor LSP no encontrado",
+                    "LSP se guardará como activado, pero falta el servidor "
+                    "del lenguaje en el PATH. OpenCode seguirá mostrando "
+                    "LSP como desactivado hasta que lo instales:\n\n"
+                    f"{cmds}\n\n"
+                    "Después de instalar, reinicia OpenCode para que lo "
+                    "detecte."
+                )
             self.data["lsp"] = True
         else:
             self.data.pop("lsp", None)

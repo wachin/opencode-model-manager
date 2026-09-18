@@ -17,9 +17,11 @@ Ejecución:
 
 import importlib.util
 import json
+import os
 import sys
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 # ------------------------------------------------------------------
@@ -465,6 +467,96 @@ class TestLspOption(unittest.TestCase):
         self.window.lsp_check.setChecked(True)
         self.window.load_config()
         self.assertFalse(self.window.lsp_check.isChecked())
+
+
+class TestLspServerDetection(unittest.TestCase):
+    """Comprobación de si el servidor LSP (pyright) está instalado."""
+
+    def test_missing_lsp_servers_with_broken_path(self):
+        """PATH sin pyright → se detecta como ausente."""
+        with unittest.mock.patch.dict(
+            os.environ, {"PATH": "/nonexistent-dir-for-tests"}
+        ):
+            self.assertEqual(omm.missing_lsp_servers(["python"]), ["pyright"])
+            self.assertFalse(omm.lsp_server_installed("pyright"))
+
+    def test_missing_lsp_servers_with_pyright_available(self):
+        """PATH con un pyright falso → no aparece como ausente."""
+        with tempfile.TemporaryDirectory() as tmp:
+            fake = Path(tmp) / "pyright"
+            fake.write_text("#!/bin/sh\nexit 0\n")
+            fake.chmod(0o755)
+            with unittest.mock.patch.dict(os.environ, {"PATH": tmp}):
+                self.assertEqual(omm.missing_lsp_servers(["python"]), [])
+                self.assertTrue(omm.lsp_server_installed("pyright"))
+
+    def test_missing_lsp_servers_ignores_unknown_languages(self):
+        """Lenguajes sin servidor conocido no generan falsos avisos."""
+        self.assertEqual(omm.missing_lsp_servers(["rust"]), [])
+
+    def test_lsp_languages_reads_config_and_defaults_to_python(self):
+        """Los lenguajes salen de "language servers" + "python" fijo."""
+        data = {"language servers": {"python": "pyright", "go": "gopls"}}
+        self.assertEqual(
+            omm.lsp_languages(data), ["go", "python"]
+        )
+        self.assertEqual(omm.lsp_languages({}), ["python"])
+
+    def test_enabling_lsp_without_pyright_warns_but_saves(self):
+        """Marcar LSP sin pyright: avisa con el comando y guarda igual."""
+        with unittest.mock.patch.dict(
+            os.environ, {"PATH": "/nonexistent-dir-for-tests"}
+        ):
+            self._toggle_with_clean_env()
+
+        self.assertIs(self.window.data.get("lsp"), True)
+        saved = json.loads(self.config.read_text(encoding="utf-8"))
+        self.assertIs(saved.get("lsp"), True)
+        self.assertEqual(len(qt_stub.QMessageBox.warning_calls), 1)
+        args = qt_stub.QMessageBox.warning_calls[0]
+        title, text = args[-2], args[-1]
+        self.assertIn("pyright", text)
+        self.assertIn("npm install -g pyright", text)
+        self.assertIn("seguirá mostrando", text)
+
+    def test_enabling_lsp_with_pyright_no_warning(self):
+        """Marcar LSP con pyright disponible: guarda sin advertencias."""
+        with tempfile.TemporaryDirectory() as tmp:
+            fake = Path(tmp) / "pyright"
+            fake.write_text("#!/bin/sh\nexit 0\n")
+            fake.chmod(0o755)
+            with unittest.mock.patch.dict(os.environ, {"PATH": tmp}):
+                self._toggle_with_clean_env()
+
+        self.assertIs(self.window.data.get("lsp"), True)
+        self.assertEqual(qt_stub.QMessageBox.warning_calls, [])
+
+    def _toggle_with_clean_env(self):
+        """Marca el checkbox LSP sobre datos recién cargados del disco."""
+        qt_stub.QMessageBox.warning_calls.clear()
+        self.window.data = json.loads(
+            self.config.read_text(encoding="utf-8")
+        )
+        self.window.toggle_lsp(qt_stub.Qt.CheckState.Checked.value)
+
+    def setUp(self):
+        qt_stub.QMessageBox.reset()
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.config = Path(self.tmp.name) / "opencode.json"
+        _write_json(
+            self.config,
+            {
+                "$schema": "https://opencode.ai/config.json",
+                "provider": {},
+            },
+        )
+        self.window = object.__new__(omm.OpenCodeModelManager)
+        self.window.data = {}
+        self.window.config_path = self.config
+        self.window.refresh = lambda: None
+        self.window.statusBar = lambda: _StatusBarRecorder()
+        self.window.lsp_check = qt_stub.QCheckBox("LSP")
 
 
 class TestWindowGeometry(unittest.TestCase):

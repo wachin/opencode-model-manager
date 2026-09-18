@@ -29,6 +29,11 @@ modelos sin volver a introducir la clave.
   (`limit`, `options`, `variants`, etc.).
 - Copia de seguridad automática (`.backup`) antes de guardar y botón de
   respaldo manual a `opencode-backups/`.
+- **Checkbox LSP**: activa o desactiva los servidores LSP de OpenCode
+  (clave `"lsp"` de `opencode.json`). Antes de activarlo comprueba si
+  el servidor del lenguaje está instalado (para Python: **pyright**) y
+  si falta, advierte con el comando de instalación: sin él, OpenCode
+  seguirá mostrando *LSP* como desactivado.
 - Recuerda el tamaño y la posición de la ventana entre sesiones
   (reencuadrada al monitor para que nunca salga de la pantalla).
 - Normaliza automáticamente la clave antigua `providers` a `provider`
@@ -52,6 +57,69 @@ Y para ejecutar:
 ```bash
 python3 opencode_model_manager.py
 ```
+
+### Servidor LSP para Python (recomendado)
+
+Si quieres que OpenCode tenga autocompletado, análisis de tipos y
+diagnósticos sobre tus archivos Python, instala también **pyright**:
+
+```bash
+npm install -g pyright
+```
+
+Comprueba que quedó en el `PATH`:
+
+```bash
+pyright --version
+command -v pyright
+```
+
+> **Nota:** si instalaste paquetes globales de npm en tu HOME (con
+> `npm config set prefix ~/.local/npm`), el binario queda en
+> `~/.local/npm/bin` — asegúrate de que ese directorio esté en tu
+> `PATH`, igual que para `opencode`.
+
+---
+
+## Activar LSP en OpenCode (checkbox LSP)
+
+OpenCode puede trabajar con servidores LSP (*Language Server
+Protocol*) para analizar tu código mientras el agente lo edita. Si
+ves el mensaje `LSPs are disabled` en OpenCode, es porque la clave
+`"lsp"` no está activada en tu `opencode.json`.
+
+Con esta GUI es un clic: marca el checkbox **LSP** (junto a **Modo
+global**) y se escribe y guarda `"lsp": true` al instante:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "lsp": true,
+  "provider": {
+    "bai": { "...": "..." }
+  }
+}
+```
+
+Al marcarlo, la herramienta comprueba si el servidor del lenguaje
+está instalado en el `PATH`:
+
+- **Si está instalado** (p. ej. `pyright`): guarda y listo — al
+  reiniciar, OpenCode mostrará `LSPs will activate as files are read`.
+- **Si falta**: guarda `"lsp": true` igualmente, pero muestra un
+  aviso con el comando de instalación y explica que **OpenCode
+  seguirá mostrando LSP como desactivado** hasta que lo instales y
+  reinicies OpenCode:
+
+  ```text
+  Servidor LSP no encontrado
+  ─────────────────────────
+  LSP se guardará como activado, pero falta el servidor del lenguaje
+  en el PATH...
+    • pyright  →  npm install -g pyright
+  ```
+
+Al desmarcar el checkbox, la clave `"lsp"` se elimina del archivo.
 
 ---
 
@@ -173,9 +241,11 @@ python3 -m unittest discover -s tests -v
 ```
 
 Cubre la migración `providers` → `provider`, el modo global (valor por
-defecto, alternancia y persistencia), la persistencia de geometría de
-ventana y restricciones transversales (por ejemplo, que `auth.json`
-jamás es accesado por el código).
+defecto, alternancia y persistencia), el checkbox LSP (escritura y
+borrado de la clave `"lsp"`, detección de `pyright` en el `PATH` con
+y sin él instalado), la persistencia de geometría de ventana y
+restricciones transversales (por ejemplo, que `auth.json` jamás es
+accesado por el código).
 
 ---
 
