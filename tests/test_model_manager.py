@@ -63,6 +63,7 @@ def _fresh_window(config_path: Path) -> omm.OpenCodeModelManager:
     window.models = []
     window.refresh = lambda: None
     window.statusBar = lambda: _StatusBarRecorder()
+    window.lsp_check = qt_stub.QCheckBox("LSP")
     return window
 
 
@@ -378,6 +379,94 @@ class TestGlobalMode(unittest.TestCase):
 # Geometría de ventana: recordar entre sesiones
 # ------------------------------------------------------------------
 
+class TestLspOption(unittest.TestCase):
+    """El checkbox LSP escribe/borra la clave "lsp" en opencode.json."""
+
+    def setUp(self):
+        qt_stub.QMessageBox.reset()
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.config = Path(self.tmp.name) / "opencode.json"
+        _write_json(
+            self.config,
+            {
+                "$schema": "https://opencode.ai/config.json",
+                "provider": {
+                    "bai": {
+                        "name": "B.AI",
+                        "models": {
+                            "deepseek-v4-flash": {"name": "DS"}
+                        },
+                    }
+                },
+            },
+        )
+        self.window = object.__new__(omm.OpenCodeModelManager)
+        self.window.data = {}
+        self.window.config_path = self.config
+        self.window.refresh = lambda: None
+        self.window.statusBar = lambda: _StatusBarRecorder()
+        self.window.lsp_check = qt_stub.QCheckBox("LSP")
+
+    def _load(self):
+        self.window.data = json.loads(self.config.read_text(encoding="utf-8"))
+
+    def test_toggle_on_adds_lsp_true(self):
+        """Marcar el checkbox escribe "lsp": true y guarda sin diálogos."""
+        self._load()
+        self.window.toggle_lsp(qt_stub.Qt.CheckState.Checked.value)
+
+        self.assertIs(self.window.data.get("lsp"), True)
+        saved = json.loads(self.config.read_text(encoding="utf-8"))
+        self.assertIs(saved.get("lsp"), True)
+        # Guardado silencioso: solo mensajes de error, nunca información.
+        self.assertEqual(qt_stub.QMessageBox.information_calls, [])
+
+    def test_toggle_off_removes_lsp(self):
+        """Desmarcar elimina la clave "lsp" del archivo."""
+        self._load()
+        self.window.toggle_lsp(qt_stub.Qt.CheckState.Checked.value)
+        self.window.toggle_lsp(0)
+
+        self.assertNotIn("lsp", self.window.data)
+        saved = json.loads(self.config.read_text(encoding="utf-8"))
+        self.assertNotIn("lsp", saved)
+
+    def test_signal_writes_file(self):
+        """La señal stateChanged del checkbox guarda el archivo."""
+        self._load()
+        self.window.lsp_check.stateChanged.connect(self.window.toggle_lsp)
+        self.window.lsp_check.setChecked(True)
+
+        saved = json.loads(self.config.read_text(encoding="utf-8"))
+        self.assertIs(saved.get("lsp"), True)
+
+    def test_load_config_syncs_checkbox(self):
+        """Al cargar, el checkbox refleja la clave "lsp" del archivo."""
+        self.window.data = {}
+        _write_json(
+            self.config,
+            {
+                "$schema": "https://opencode.ai/config.json",
+                "lsp": True,
+                "provider": {},
+            },
+        )
+        self.window.load_config()
+        self.assertTrue(self.window.lsp_check.isChecked())
+
+    def test_load_config_without_lsp_unchecks(self):
+        """Sin la clave "lsp", el checkbox aparece desmarcado."""
+        self.window.data = {"lsp": True}
+        _write_json(
+            self.config,
+            {"$schema": "https://opencode.ai/config.json", "provider": {}},
+        )
+        self.window.lsp_check.setChecked(True)
+        self.window.load_config()
+        self.assertFalse(self.window.lsp_check.isChecked())
+
+
 class TestWindowGeometry(unittest.TestCase):
     """_restore_window_geometry() / _fit_to_screen() / closeEvent()."""
 
@@ -401,6 +490,7 @@ class TestWindowGeometry(unittest.TestCase):
         window.models = []
         window.refresh = lambda: None
         window.statusBar = lambda: _StatusBarRecorder()
+        window.lsp_check = qt_stub.QCheckBox("LSP")
         return window
 
     def test_close_event_saves_geometry(self):

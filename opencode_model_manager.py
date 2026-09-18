@@ -383,6 +383,15 @@ class OpenCodeModelManager(QMainWindow):
         )
         self.global_check.stateChanged.connect(self.toggle_global_mode)
         top_buttons.addWidget(self.global_check)
+
+        self.lsp_check = QCheckBox("LSP")
+        self.lsp_check.setToolTip(
+            "Activa o desactiva los servidores LSP de OpenCode (clave \"lsp\"\n"
+            "de opencode.json). Requiere tener instalado el servidor del\n"
+            "lenguaje, por ejemplo: npm install -g pyright"
+        )
+        self.lsp_check.stateChanged.connect(self.toggle_lsp)
+        top_buttons.addWidget(self.lsp_check)
         top_buttons.addStretch()
         left_layout.addLayout(top_buttons)
 
@@ -516,10 +525,25 @@ class OpenCodeModelManager(QMainWindow):
 
         self.statusBar().showMessage("Listo.")
 
-        # Sincroniza el checkbox con la preferencia sin disparar la señal.
+        # Sincroniza los checkboxes con la configuración cargada sin
+        # disparar señales (los datos llegan vía load_config()).
         self.global_check.blockSignals(True)
         self.global_check.setChecked(self.use_global)
         self.global_check.blockSignals(False)
+
+        self.lsp_check.blockSignals(True)
+        self.lsp_check.setChecked(bool(self.data.get("lsp")))
+        self.lsp_check.blockSignals(False)
+
+    def toggle_lsp(self, state):
+        """Activa o desactiva la clave "lsp" de opencode.json."""
+        enabled = state == Qt.CheckState.Checked.value
+        if enabled:
+            self.data["lsp"] = True
+        else:
+            self.data.pop("lsp", None)
+
+        self.save_config(quiet=True)
 
     def toggle_global_mode(self, state):
         use_global = state == Qt.CheckState.Checked.value
@@ -648,6 +672,11 @@ class OpenCodeModelManager(QMainWindow):
                 "El contenido de opencode.json debe ser un objeto JSON."
             )
             return
+
+        # Sincroniza el checkbox LSP con la clave "lsp" del archivo.
+        self.lsp_check.blockSignals(True)
+        self.lsp_check.setChecked(bool(self.data.get("lsp")))
+        self.lsp_check.blockSignals(False)
 
         migrated = False
         if "providers" in self.data and "provider" not in self.data:
@@ -1073,7 +1102,7 @@ class OpenCodeModelManager(QMainWindow):
             f"Backup guardado en:\n\n{backup}"
         )
 
-    def save_config(self):
+    def save_config(self, quiet: bool = False):
         try:
             json_text = json.dumps(
                 self.data, indent=2, ensure_ascii=False
@@ -1108,6 +1137,12 @@ class OpenCodeModelManager(QMainWindow):
             return
 
         self.refresh()
+        if quiet:
+            self.statusBar().showMessage(
+                f"Guardado: {self.config_path}"
+            )
+            return
+
         QMessageBox.information(
             self,
             "Guardado",
