@@ -306,7 +306,10 @@ class QWidget:
         return found
 
     def setToolTip(self, tip: str) -> None:
-        pass
+        self._tool_tip = tip
+
+    def toolTip(self) -> str:
+        return getattr(self, "_tool_tip", "")
 
     def setStyleSheet(self, sheet: str) -> None:
         self._style_sheet = sheet or ""
@@ -412,8 +415,17 @@ class QMainWindow(QWidget):
 
 
 class _StatusBar:
-    def showMessage(self, message: str) -> None:
+    """Barra de estado: guarda el último mensaje y responde currentMessage(),
+    que es lo que el código real lee para comprobar los avisos al usuario."""
+
+    def __init__(self) -> None:
+        self.last_message = ""
+
+    def showMessage(self, message: str, timeout: int = 0) -> None:
         self.last_message = message
+
+    def currentMessage(self) -> str:
+        return self.last_message
 
 
 class QDialog(QWidget):

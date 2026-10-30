@@ -72,6 +72,7 @@ def _minimal_window(config_path: Path) -> omm.OpenCodeModelManager:
     window.lsp_check = qt_stub.QCheckBox("LSP")
     window.global_check = qt_stub.QCheckBox("Modo global")
     window._file_fingerprint = None
+    window._saved_json = None
     window._current_entry = ("", "")
     window._current_kind = "model"
     return window
@@ -101,9 +102,13 @@ class _FakeEvent:
 
     def __init__(self) -> None:
         self.accepted = False
+        self.ignored = False
 
     def accept(self) -> None:
         self.accepted = True
+
+    def ignore(self) -> None:
+        self.ignored = True
 
 
 class _FakeScreen:
@@ -590,6 +595,47 @@ class TestWindowGeometry(unittest.TestCase):
             "OpenCodeTools", "OpenCodeModelManager"
         )
         self.assertTrue(settings.contains("geometry"))
+
+    def test_close_event_asks_before_losing_unsaved_changes(self):
+        """Con cambios sin escribir y «No» respondido, la ventana no cierra."""
+        window = self._make_window()
+        window.data = {"provider": {"acme": {"npm": "@ai-sdk/openai-compatible"}}}
+        window._mark_saved()
+        window.data["provider"] = {}
+
+        qt_stub.QMessageBox.question_reply = qt_stub.QMessageBox.StandardButton.No
+        event = _FakeEvent()
+        window.closeEvent(event)
+
+        self.assertTrue(event.ignored)
+        self.assertFalse(event.accepted)
+        self.assertEqual(len(qt_stub.QMessageBox.question_calls), 1)
+        settings = qt_stub.QSettings("OpenCodeTools", "OpenCodeModelManager")
+        self.assertFalse(settings.contains("geometry"))
+
+    def test_close_event_accepts_when_the_answer_is_yes(self):
+        window = self._make_window()
+        window.data = {"provider": {"acme": {}}}
+        window._mark_saved()
+        window.data["provider"] = {}
+
+        qt_stub.QMessageBox.question_reply = qt_stub.QMessageBox.StandardButton.Yes
+        event = _FakeEvent()
+        window.closeEvent(event)
+
+        self.assertTrue(event.accepted)
+        self.assertFalse(event.ignored)
+
+    def test_a_clean_window_closes_without_asking(self):
+        window = self._make_window()
+        window.data = {"provider": {"acme": {}}}
+        window._mark_saved()
+
+        event = _FakeEvent()
+        window.closeEvent(event)
+
+        self.assertTrue(event.accepted)
+        self.assertEqual(qt_stub.QMessageBox.question_calls, [])
 
     def test_geometry_round_trip(self):
         """Cerrar y reabrir recupera tamaño y posición guardados."""

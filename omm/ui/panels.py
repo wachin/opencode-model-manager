@@ -544,6 +544,17 @@ class DetailsPanel(QWidget):
             self.small_btn.setToolTip(self.default_btn.toolTip())
             self.edit_btn.setEnabled(registered)
             self.remove_btn.setEnabled(registered)
+            # Un botón gris sin explicación parece un fallo: los proveedores
+            # del árbol existen aunque no estén en opencode.json.
+            why = (
+                "Editar y quitar actúan sobre lo que hay en opencode.json."
+                if registered
+                else "Este proveedor no está en opencode.json: no hay nada "
+                     "que editar ni quitar. En el árbol sigue visible porque "
+                     "viene del catálogo de Models.dev."
+            )
+            self.edit_btn.setToolTip(why)
+            self.remove_btn.setToolTip(why)
         else:
             self.add_btn.setEnabled(not registered)
             self.add_btn.setToolTip(

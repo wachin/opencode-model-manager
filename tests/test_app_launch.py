@@ -228,6 +228,36 @@ report["on_disk"] = json.loads(config_path.read_text(encoding="utf-8"))
 report["backups"] = sorted(p.name for p in (config_path.parent / "opencode-backups").iterdir())
 report["tmp_left"] = [p.name for p in config_path.parent.glob("*.tmp")]
 
+# --- quitar un proveedor, con Qt real --------------------------------------
+# Es el caso del informe: el mando quitaba el proveedor de la memoria sin
+# avisar y sin escribir el archivo. Se responde «Sí» a cada pregunta (y se
+# anotan los títulos, para comprobar que el aviso al cerrar también sale).
+from PyQt6.QtWidgets import QMessageBox  # noqa: E402
+
+asked = []
+
+
+def _answer_yes(*args, **kwargs):
+    asked.append(args[1] if len(args) > 1 else "")
+    return QMessageBox.StandardButton.Yes
+
+
+QMessageBox.question = staticmethod(_answer_yes)
+window.show_provider("acme")
+report["rm_enabled"] = window.details.remove_btn.isEnabled()
+report["rm_label"] = window.details.remove_btn.text()
+report["save_before"] = window.save_btn.text()
+window.details.remove_btn.click()
+app.processEvents()
+report["save_after"] = window.save_btn.text()
+report["save_tip"] = window.save_btn.toolTip()
+report["status_after"] = window.statusBar().currentMessage()
+report["memory_after"] = "acme" in window.providers()
+report["disk_after"] = "acme" in json.loads(
+    config_path.read_text(encoding="utf-8")
+)["provider"]
+
+report["questions"] = asked  # mismo objeto: se rellena también al cerrar
 QTimer.singleShot(50, window.close)
 QTimer.singleShot(250, app.quit)
 code = app.exec()
@@ -385,6 +415,27 @@ class TestRealAppLaunch(unittest.TestCase):
         zeta = self.report["card_zeta"]["texts"]
         for ghost in ("Acme Coder", "acme-coder", "https://api.acme.test/v1"):
             self.assertNotIn(ghost, zeta)
+
+    def test_removing_a_provider_announces_itself_and_waits_for_save(self):
+        """Con Qt real: «Quitar proveedor» avisa, marca «Guardar» y no escribe.
+
+        El informe del usuario era «no funciona»: se quitaba de la memoria sin
+        mensaje, el árbol seguía mostrando el proveedor y el archivo no
+        cambiaba hasta pulsar Guardar.
+        """
+        self.assertTrue(self.report["rm_enabled"])
+        self.assertEqual(self.report["rm_label"], "Quitar proveedor")
+        self.assertEqual(self.report["save_before"], "Guardar")
+        self.assertEqual(self.report["save_after"], "Guardar ●")
+        self.assertIn("sin escribir", self.report["save_tip"])
+        self.assertIn("aún no guardado", self.report["status_after"])
+        self.assertFalse(self.report["memory_after"])
+        self.assertTrue(
+            self.report["disk_after"],
+            "quitar un proveedor no puede reescribir opencode.json solo",
+        )
+        self.assertIn("Confirmar eliminación", self.report["questions"])
+        self.assertIn("Cambios sin guardar", self.report["questions"])
 
     # -- tema con Qt real --------------------------------------------------
     def test_light_theme_does_not_inherit_a_dark_desktop(self):

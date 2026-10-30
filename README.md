@@ -308,6 +308,15 @@ Al pulsar **Guardar**:
 4. Se escribe en un temporal, se hace `fsync` y se reemplaza con
    `os.replace`, de modo que un corte no deja el archivo a medias.
 
+**Ningún mando escribe por sí solo.** Agregar un modelo, editar, fijar
+`model`/`small_model`, quitar un modelo o **quitar un proveedor** se
+aplican en memoria y se anuncian en la barra de estado. Mientras algo esté
+pendiente, el botón se lee **`Guardar ●`** —con el aviso «hay cambios sin
+escribir en opencode.json» al pasar el ratón— y al cerrar la ventana se
+pregunta antes de perder los cambios. De ahí que al quitar un proveedor
+su fila siga en el árbol: lo que se va es la marca `●` de registrado, y el
+nombre permanece porque viene del catálogo de Models.dev.
+
 ---
 
 ## Arquitectura del código
@@ -484,7 +493,7 @@ El cambio se hace en memoria; se escribe al disco cuando guardas.
 python3 -m unittest discover -s tests -v
 ```
 
-**233 tests** en dos capas, en menos de tres segundos:
+**243 tests** en dos capas, en menos de tres segundos:
 
 - **Headless con stub** (`tests/qt_stub.py`): la lógica de ventana,
   paneles y diálogos corre sin PyQt6, sin ventanas y sin tocar tu
@@ -498,7 +507,11 @@ python3 -m unittest discover -s tests -v
   los flujos de ventana (`tests/test_flows.py`): árbol plegado por
   defecto, buscar con el árbol plegado, cada mando de filtro aplicando por
   sí solo, `Enter` para abrir la ficha, botón `small_model`, registro,
-  retirada, guardado, recarga y atajos. También vigila la ficha: cada fila
+  retirada, guardado, recarga y atajos. Y el quite de proveedores
+  completo (`TestProviderRemoval`): pide confirmación, deja el archivo
+  intacto hasta Guardar, avisa en la barra, marca el botón con `●`,
+  descarta el `model` que apuntaba a ese proveedor y, si el proveedor solo
+  está en el catálogo, el botón apagado explica por qué. También vigila la ficha: cada fila
   entra con `addLayout`, así que `item.widget()` es `None`; el stub ahora
   replica ese detalle (y el reparenteo que hace Qt) y comprueba que la
   tarjeta contiene exactamente dos etiquetas por fila, vista nueva o
@@ -515,7 +528,11 @@ python3 -m unittest discover -s tests -v
   sobre la tarjeta de la ficha mide, tras tres vistas consecutivas, que
   sólo quedan las etiquetas de la fila visible (éste es el defecto del
   texto duplicado que reportó el usuario: con Qt real las etiquetas sí son
-  hijas de la tarjeta, y el stub las ignoraba). También fuerza una
+  hijas de la tarjeta, y el stub las ignoraba). Con el mismo binario quita
+  un proveedor registrado (respondiendo «Sí» a la pregunta) y comprueba
+  que el aviso sale en la barra, que el botón pasa a `Guardar ●`, que
+  `opencode.json` no se tocó y que al cerrar aparece «Cambios sin
+  guardar». También fuerza una
   **paleta de sistema oscura** y mide píxeles de la ventana pintada: el
   tema claro tiene que salir claro (cabecera, workspace, barra de estado y
   el panel de pestañas del diálogo) y el oscuro oscuro. Se omite solo si

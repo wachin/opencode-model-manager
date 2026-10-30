@@ -664,6 +664,71 @@ class TestSaveFlows(_WindowCase):
 
 
 # ---------------------------------------------------------------------------
+# Quitar proveedores
+# ---------------------------------------------------------------------------
+
+class TestProviderRemoval(_WindowCase):
+    """El reporte del usuario: «le di a Quitar proveedor y no funciona».
+
+    El mando sí quitaba el proveedor de la memoria, sin aviso y sin escribir
+    el archivo, así que el árbol (que también muestra el catálogo) seguía
+    igual. Aquí queda fijado el contrato: confirmación, aviso, nada en disco
+    hasta «Guardar».
+    """
+
+    def remove_provider(self, pid: str) -> None:
+        self.window.show_provider(pid)
+        self.answer(True)
+        self.window.details.remove_btn.click()
+
+    def test_removal_asks_first_and_is_not_written_yet(self):
+        self.remove_provider("acme")
+        self.assertEqual(len(qt_stub.QMessageBox.question_calls), 1)
+        self.assertNotIn("acme", self.window.providers())
+        self.assertIn("acme", self.written()["provider"])
+        message = self.window.statusBar().currentMessage()
+        self.assertIn("aún no guardado", message)
+        self.assertIn("Guardar", message)
+
+    def test_the_save_button_admits_pending_changes(self):
+        self.assertEqual(self.window.save_btn.text(), "Guardar")
+        self.remove_provider("acme")
+        self.assertEqual(self.window.save_btn.text(), "Guardar ●")
+        self.assertIn("sin escribir", self.window.save_btn.toolTip())
+
+        self.window.save_config(quiet=True)
+        self.assertEqual(self.window.save_btn.text(), "Guardar")
+        self.assertNotIn("acme", self.written()["provider"])
+
+    def test_declining_the_confirmation_changes_nothing(self):
+        self.window.show_provider("acme")
+        self.answer(False)
+        self.window.details.remove_btn.click()
+        self.assertIn("acme", self.window.providers())
+        self.assertEqual(self.window.save_btn.text(), "Guardar")
+        self.assertIn("acme", self.written()["provider"])
+
+    def test_a_catalog_only_provider_explains_the_greyed_button(self):
+        self.window.show_provider("zeta")
+        self.assertFalse(self.window.details.remove_btn.isEnabled())
+        self.assertFalse(self.window.details.edit_btn.isEnabled())
+        self.assertIn("catálogo", self.window.details.remove_btn.toolTip())
+        self.assertIn("catálogo", self.window.details.edit_btn.toolTip())
+
+    def test_removing_the_provider_drops_its_default_model(self):
+        self.assertEqual(self.window.data.get("model"), "acme/acme-coder")
+        self.remove_provider("acme")
+        self.assertNotIn("model", self.window.data)
+
+    def test_reloading_forgets_the_pending_removal(self):
+        """Ctrl+R descarta lo no guardado: el aviso tiene que ser verdad."""
+        self.remove_provider("acme")
+        self.window.load_config()
+        self.assertIn("acme", self.window.providers())
+        self.assertEqual(self.window.save_btn.text(), "Guardar")
+
+
+# ---------------------------------------------------------------------------
 # Atajos de teclado (los slots que ejecutan)
 # ---------------------------------------------------------------------------
 

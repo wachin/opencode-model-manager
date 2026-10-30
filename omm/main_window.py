@@ -206,6 +206,7 @@ class OpenCodeModelManager(QMainWindow):
         self.filters = Filters()
         self.worker = None
         self._file_fingerprint = None
+        self._saved_json: str | None = None
         self._current_entry: tuple[str, str] = ("", "")
         self._current_kind = "model"
         self._theme_mode = str(self.settings.value("theme", "auto"))
@@ -1163,6 +1164,11 @@ class OpenCodeModelManager(QMainWindow):
         self._current_entry = ("", "")
         self.refresh()
         self.show_overview()
+        self.statusBar().showMessage(
+            f"Proveedor «{pid}» quitado de opencode.json (aún no guardado). "
+            "Si sigue en el árbol es porque existe en el catálogo: pulsa "
+            "«Guardar» para escribir el archivo."
+        )
 
     # ------------------------------------------------------------------
     # Carga, refresco y guardado de la configuración
@@ -1184,6 +1190,7 @@ class OpenCodeModelManager(QMainWindow):
             if reply == QMessageBox.StandardButton.Yes:
                 self.data = {"$schema": SCHEMA_URL, "provider": {}}
                 self._file_fingerprint = None
+                self._mark_saved()
                 self.refresh()
             else:
                 self.statusBar().showMessage("Archivo no encontrado.")
@@ -1237,8 +1244,36 @@ class OpenCodeModelManager(QMainWindow):
                 "antes de continuar."
             )
 
+        self._mark_saved()
         self.refresh()
         self.statusBar().showMessage(f"Cargado: {path}")
+
+    def _snapshot(self) -> str:
+        return json.dumps(self.data, sort_keys=True, ensure_ascii=False)
+
+    def _mark_saved(self) -> None:
+        """Punto de comparación para «cambios sin guardar»."""
+        self._saved_json = self._snapshot()
+
+    def _is_dirty(self) -> bool:
+        if self._saved_json is None:
+            return False
+        return self._snapshot() != self._saved_json
+
+    def _update_save_button(self) -> None:
+        """Mantiene visible que hay cambios pendientes de escribir.
+
+        Todos los mandos que modifican la configuración son en memoria: sin
+        este indicador el usuario pulsa «Quitar proveedor», ve que el árbol
+        sigue igual (el proveedor viene del catálogo) y cree que no funcionó.
+        """
+        dirty = self._is_dirty()
+        self.save_btn.setText("Guardar ●" if dirty else "Guardar")
+        self.save_btn.setToolTip(
+            "Hay cambios sin escribir en opencode.json (Ctrl+S)."
+            if dirty
+            else "Valida, respalda y guarda opencode.json (Ctrl+S)."
+        )
 
     def refresh(self):
         """Vuelve a pintar la ventana a partir de self.data y del catálogo."""
@@ -1248,6 +1283,7 @@ class OpenCodeModelManager(QMainWindow):
             f"{'modo global' if self.use_global else 'modo repositorio'}"
         )
         self.update_tree()
+        self._update_save_button()
 
         pid, mid = self._current_entry
         if mid:
@@ -1328,6 +1364,7 @@ class OpenCodeModelManager(QMainWindow):
             return False
 
         self._file_fingerprint = file_fingerprint(path)
+        self._mark_saved()
         self.refresh()
         if quiet:
             self.statusBar().showMessage(f"Guardado: {path}")
@@ -1382,6 +1419,18 @@ class OpenCodeModelManager(QMainWindow):
 
     def closeEvent(self, event):
         """Guarda tamaño, posición y anchos del divisor para la próxima sesión."""
+        if self._is_dirty():
+            reply = QMessageBox.question(
+                self,
+                "Cambios sin guardar",
+                "opencode.json todavía no contiene los cambios de esta "
+                "ventana.\n\n¿Salir sin guardar?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                event.ignore()
+                return
         self.settings.setValue("geometry", self.saveGeometry())
         splitter = getattr(self, "splitter", None)
         if splitter is not None:
