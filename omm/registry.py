@@ -454,7 +454,14 @@ def model_detail_rows(
         )
     rows: list[tuple[str, str]] = []
     if provider is not None or config_provider is not None:
-        pid = (model.provider_id if model else "") or (config_provider or {}).get("id", "")
+        # El id del proveedor también vive en ProviderEntry: un modelo que no
+        # está ni en el catálogo ni en opencode.json sólo tiene esa fuente, y
+        # sin ella la ficha mostraba «ID del proveedor» vacío.
+        pid = (
+            (model.provider_id if model else "")
+            or (provider.id if provider else "")
+            or (config_provider or {}).get("id", "")
+        )
         pname = (provider.name if provider else "") or (config_provider or {}).get("name", "")
         rows.append(("Proveedor", pname or pid))
         rows.append(("ID del proveedor", pid))

@@ -229,6 +229,61 @@ class TestProviderTree(_WindowCase):
 
 
 # ---------------------------------------------------------------------------
+# La ficha se reconstruye: nada de filas heredadas de la vista anterior
+# ---------------------------------------------------------------------------
+
+class TestDetailsCardIsClean(_WindowCase):
+    """Cada fila de la ficha entra con addLayout(), así que su item exterior
+    no es un widget. Un bucle de limpieza que sólo mire item.widget() no
+    borra nada y el usuario ve dos textos superpuestos."""
+
+    def card_labels(self) -> list[str]:
+        return [
+            label.text()
+            for label in self.window.details.card.findChildren(qt_stub.QLabel)
+        ]
+
+    def test_rows_are_sublayouts_without_widgets_at_the_top_level(self):
+        self.window.show_model("acme", "acme-coder")
+        grid = self.window.details.grid
+        self.assertGreater(grid.count(), 0)
+        for i in range(grid.count()):
+            item = grid.itemAt(i)
+            self.assertIsNone(item.widget())
+            self.assertIsNotNone(item.layout())
+
+    def test_the_card_holds_exactly_the_visible_rows(self):
+        self.window.show_model("acme", "acme-coder")
+        grid = self.window.details.grid
+        # Dos etiquetas por fila (clave y valor) y nada más dentro de la tarjeta.
+        self.assertEqual(len(self.card_labels()), grid.count() * 2)
+
+    def test_changing_the_selection_leaves_no_ghost_rows(self):
+        self.window.show_model("acme", "acme-coder")
+        self.window.show_provider("zeta")
+        labels = self.card_labels()
+        grid = self.window.details.grid
+        self.assertEqual(len(labels), grid.count() * 2)
+        self.assertNotIn("Acme Coder", labels)
+        self.assertNotIn("acme-coder", labels)
+        self.assertNotIn("https://api.acme.test/v1", labels)
+
+    def test_a_third_view_does_not_accumulate_either(self):
+        for pid, mid in (("acme", "acme-coder"), ("acme", "acme-lite"),
+                         ("zeta", "zeta-big")):
+            self.window.show_model(pid, mid)
+            grid = self.window.details.grid
+            self.assertEqual(len(self.card_labels()), grid.count() * 2)
+
+    def test_repeating_the_same_view_is_idempotent(self):
+        self.window.show_model("acme", "acme-coder")
+        first = self.card_labels()
+        self.window.show_provider("zeta")
+        self.window.show_model("acme", "acme-coder")
+        self.assertEqual(self.card_labels(), first)
+
+
+# ---------------------------------------------------------------------------
 # Búsqueda y filtros
 # ---------------------------------------------------------------------------
 

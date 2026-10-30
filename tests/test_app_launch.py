@@ -68,7 +68,7 @@ from pathlib import Path
 sys.path.insert(0, os.environ["OMM_ROOT"])
 
 from PyQt6.QtCore import QTimer
-from PyQt6.QtWidgets import QApplication
+from PyQt6.QtWidgets import QApplication, QLabel
 
 from omm.main_window import OpenCodeModelManager
 from omm.ui.dialogs import ProviderDialog
@@ -193,6 +193,27 @@ report["registered_after"] = "acme-lite" in (
 report["small_enabled"] = window.details.small_btn.isEnabled()
 window.details.small_btn.click()
 report["small_after"] = window.data.get("small_model")
+
+# --- la ficha, con Qt de verdad: cada vista reemplaza a la anterior ---------
+# Las filas entran con addLayout(), así que item.widget() del nivel exterior
+# es None. Con Qt real las etiquetas SÍ son hijas de la tarjeta, y ahí es
+# donde se veían dos textos superpuestos.
+def card_state():
+    labels = window.details.card.findChildren(QLabel)
+    app.processEvents()
+    return {
+        "rows": window.details.grid.count(),
+        "labels": len(labels),
+        "texts": sorted(label.text() for label in labels),
+    }
+
+
+window.show_model("acme", "acme-coder")
+report["card_coder"] = card_state()
+window.show_provider("zeta")
+report["card_zeta"] = card_state()
+window.show_model("acme", "acme-lite")
+report["card_lite"] = card_state()
 
 # Sin coincidencias: la lista se queda vacía y el aviso debe verse.
 window.header.search_edit.setText("nada-de-esto-existe")
@@ -346,6 +367,24 @@ class TestRealAppLaunch(unittest.TestCase):
     def test_empty_result_shows_the_notice(self):
         self.assertEqual(self.report["empty_rows"], 0)
         self.assertTrue(self.report["empty_notice"])
+
+    def test_the_details_card_keeps_only_its_own_rows(self):
+        """Con Qt real: cambiar de selección no puede dejar etiquetas previas.
+
+        Es el defecto del informe del usuario: la ficha mostraba dos textos
+        superpuestos porque las filas viven en sub-layouts.
+        """
+        for key in ("card_coder", "card_zeta", "card_lite"):
+            state = self.report[key]
+            self.assertGreater(state["rows"], 0, key)
+            self.assertEqual(
+                state["labels"], state["rows"] * 2,
+                f"{key} dejó {state['labels']} etiquetas para "
+                f"{state['rows']} filas: hay filas fantasma",
+            )
+        zeta = self.report["card_zeta"]["texts"]
+        for ghost in ("Acme Coder", "acme-coder", "https://api.acme.test/v1"):
+            self.assertNotIn(ghost, zeta)
 
     # -- tema con Qt real --------------------------------------------------
     def test_light_theme_does_not_inherit_a_dark_desktop(self):

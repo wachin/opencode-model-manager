@@ -262,6 +262,48 @@ class QRect:
 class QWidget:
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         self._visible = True
+        self._stub_children: list[Any] = []
+        self._stub_parent: Any = None
+        # QWidget(texto, padre) y QWidget(padre): en Qt el segundo argumento
+        # reparenta, y los tests de «no quedan widgets fantasma» lo necesitan.
+        for arg in args:
+            if isinstance(arg, QWidget):
+                arg._register_child(self)
+
+    def _register_child(self, child: "QWidget") -> None:
+        if child not in self._stub_children:
+            self._stub_children.append(child)
+            child._stub_parent = self
+
+    def setParent(self, parent: Any) -> None:
+        previous = self._stub_parent
+        if previous is not None and self in previous._stub_children:
+            previous._stub_children.remove(self)
+        self._stub_parent = None
+        if parent is not None:
+            parent._register_child(self)
+
+    def setLayout(self, layout: Any) -> None:
+        self._stub_layout = layout
+        if layout is not None:
+            layout._attach_owner(self)
+
+    def parent(self) -> Any:
+        return self._stub_parent
+
+    def layout(self) -> Any:
+        return getattr(self, "_stub_layout", None)
+
+    def children(self) -> list:
+        return list(self._stub_children)
+
+    def findChildren(self, type_: Any) -> list:
+        found = []
+        for child in self._stub_children:
+            if isinstance(child, type_):
+                found.append(child)
+            found.extend(child.findChildren(type_))
+        return found
 
     def setToolTip(self, tip: str) -> None:
         pass
@@ -794,37 +836,115 @@ class QGroupBox(QWidget):
 
 
 class _LayoutItem:
-    """Envoltorio mínimo de QLayoutItem: basta con widget() y sizeHint()."""
+    """Envoltorio mínimo de QLayoutItem: widget() Y layout().
 
-    def __init__(self, widget: Any = None, args: tuple = ()) -> None:
+    Sin layout() los tests no podían ver que takeAt(0).widget() devuelve None
+    en las filas añadidas con addLayout(): el bug de las etiquetas fantasma de
+    la ficha vivía exactamente ahí.
+    """
+
+    def __init__(self, widget: Any = None, args: tuple = (),
+                 layout: Any = None) -> None:
         self._widget = widget
+        self._layout = layout
         self._args = args
 
     def widget(self) -> Any:
         return self._widget
+
+    def layout(self) -> Any:
+        return self._layout
 
     def sizeHint(self) -> Any:
         return None
 
 
 class _LayoutMixin:
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
+    """Layout de prueba con las dos cosas que el stub no tenía: el widget
+    dueño y los sub-layouts como items.
+
+    addWidget() reparenta en el dueño (Qt lo hace) y addLayout() produce un
+    item cuyo widget() es None pero cuyo layout() sí existe. Sin eso, un
+    bucle de limpieza que sólo mire item.widget() pasa todos los tests
+    aunque en Qt deje las etiquetas de la ficha anterior pintadas encima.
+    """
+
+    def __init__(self, parent: Any = None, *args: Any, **kwargs: Any) -> None:
         self._items: list[Any] = []
         self._layout_items: list[_LayoutItem] = []
+        self._owner: Any = None
+        self._parent_layout: Any = None
+        if isinstance(parent, _LayoutMixin):
+            self._parent_layout = parent
+        elif isinstance(parent, QWidget):
+            if parent.layout() is None:
+                parent.setLayout(self)
+            else:
+                self._attach_owner(parent)
+
+    def _attach_owner(self, widget: Any) -> None:
+        self._owner = widget
+
+    def parentWidget(self) -> Any:
+        return self._owner
+
+    def _resolve_owner(self) -> Any:
+        layout: Any = self
+        while layout is not None:
+            if layout._owner is not None:
+                return layout._owner
+            layout = layout._parent_layout
+        return None
+
+    def _adopt(self, widget: Any) -> None:
+        owner = self._resolve_owner()
+        if owner is not None and widget._stub_parent is not owner:
+            widget.setParent(owner)
+
+    def _owned_widgets(self) -> list[Any]:
+        """Widgets de este layout y de los sub-layouts que contenga."""
+        widgets: list[Any] = []
+        for item in self._layout_items:
+            if item._widget is not None:
+                widgets.append(item._widget)
+            if item._layout is not None:
+                widgets.extend(item._layout._owned_widgets())
+        return widgets
 
     def addWidget(self, widget: Any, *args: Any, **kwargs: Any) -> None:
         self._items.append(widget)
         self._layout_items.append(_LayoutItem(widget, args))
+        if isinstance(widget, QWidget):
+            self._adopt(widget)
 
     def insertWidget(self, index: int, widget: Any, *args: Any) -> None:
         self._items.insert(index, widget)
         self._layout_items.insert(index, _LayoutItem(widget, args))
+        if isinstance(widget, QWidget):
+            self._adopt(widget)
 
     def addLayout(self, layout: Any, *args: Any, **kwargs: Any) -> None:
         self._items.append(layout)
+        self._layout_items.append(_LayoutItem(None, args, layout))
+        if isinstance(layout, _LayoutMixin):
+            layout._parent_layout = self
+            # Qt reparenta al widget dueño cuando el sub-layout se instala:
+            # si no, un addWidget previo a el addLayout quedaría huérfano y
+            # los tests de «no sobran etiquetas» no verían el bug de la ficha.
+            for widget in layout._owned_widgets():
+                self._adopt(widget)
 
     def addRow(self, *args: Any, **kwargs: Any) -> None:
         self._items.append(args)
+        for arg in args:
+            if isinstance(arg, _LayoutMixin):
+                arg._parent_layout = self
+                self._layout_items.append(_LayoutItem(None, (), arg))
+                for widget in arg._owned_widgets():
+                    self._adopt(widget)
+            elif isinstance(arg, QWidget):
+                self._layout_items.append(_LayoutItem(arg))
+                self._adopt(arg)
 
     def addStretch(self, *args: Any, **kwargs: Any) -> None:
         pass

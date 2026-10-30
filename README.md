@@ -484,7 +484,7 @@ El cambio se hace en memoria; se escribe al disco cuando guardas.
 python3 -m unittest discover -s tests -v
 ```
 
-**226 tests** en dos capas, en menos de tres segundos:
+**233 tests** en dos capas, en menos de tres segundos:
 
 - **Headless con stub** (`tests/qt_stub.py`): la lógica de ventana,
   paneles y diálogos corre sin PyQt6, sin ventanas y sin tocar tu
@@ -498,7 +498,11 @@ python3 -m unittest discover -s tests -v
   los flujos de ventana (`tests/test_flows.py`): árbol plegado por
   defecto, buscar con el árbol plegado, cada mando de filtro aplicando por
   sí solo, `Enter` para abrir la ficha, botón `small_model`, registro,
-  retirada, guardado, recarga y atajos. Las restricciones de seguridad
+  retirada, guardado, recarga y atajos. También vigila la ficha: cada fila
+  entra con `addLayout`, así que `item.widget()` es `None`; el stub ahora
+  replica ese detalle (y el reparenteo que hace Qt) y comprueba que la
+  tarjeta contiene exactamente dos etiquetas por fila, vista nueva o
+  vista repetida. Las restricciones de seguridad
   también se prueban: `auth.json` idéntico byte a byte, ninguna clave
   escrita y buscar no registra nada.
 - **Qt auténtico** (`tests/test_app_launch.py`): arranca la aplicación
@@ -507,7 +511,11 @@ python3 -m unittest discover -s tests -v
   buscar → filtrar → expandir → registrar → fijar `small_model` →
   guardar. Comprueba que el proceso termina sin trazas, que el archivo
   final es JSON válido y conserva lo previo, que quedó un respaldo, que
-  no quedan `.tmp` y que `auth.json` no se tocó. También fuerza una
+  no quedan `.tmp` y que `auth.json` no se tocó. Con `findChildren(QLabel)`
+  sobre la tarjeta de la ficha mide, tras tres vistas consecutivas, que
+  sólo quedan las etiquetas de la fila visible (éste es el defecto del
+  texto duplicado que reportó el usuario: con Qt real las etiquetas sí son
+  hijas de la tarjeta, y el stub las ignoraba). También fuerza una
   **paleta de sistema oscura** y mide píxeles de la ventana pintada: el
   tema claro tiene que salir claro (cabecera, workspace, barra de estado y
   el panel de pestañas del diálogo) y el oscuro oscuro. Se omite solo si

@@ -481,17 +481,33 @@ class DetailsPanel(QWidget):
         },
     }
 
+    @staticmethod
+    def _clear_rows(layout) -> None:
+        """Vacía el grid de la ficha por completo, incluyendo sub-layouts.
+
+        Cada fila se añade con addLayout(), así que item.widget() del nivel
+        exterior es siempre None: sin bajar un nivel, las etiquetas de la
+        ficha anterior quedan hijas de la tarjeta y se pintan encima.
+        setParent(None) las esconde al instante; deleteLater() no actuaría
+        hasta la siguiente vuelta al bucle de eventos.
+        """
+        while layout.count():
+            item = layout.takeAt(0)
+            inner = item.layout()
+            if inner is not None:
+                DetailsPanel._clear_rows(inner)
+            widget = item.widget()
+            if widget is not None:
+                widget.setParent(None)
+                widget.deleteLater()
+
     def show_rows(self, title: str, subtitle: str, badge: str, rows,
                   registered: bool, kind: str = "model") -> None:
         labels = self._MODE_LABELS.get(kind, self._MODE_LABELS["model"])
         self.title.setText(title)
         self.subtitle.setText(subtitle)
         self.badge.setText(badge)
-        while self.grid.count():
-            it = self.grid.takeAt(0)
-            w = it.widget()
-            if w is not None:
-                w.deleteLater()
+        self._clear_rows(self.grid)
         for label, value in rows:
             row = QHBoxLayout()
             key = QLabel(label)

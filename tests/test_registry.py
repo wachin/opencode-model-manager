@@ -218,6 +218,13 @@ class TestDetailRows(unittest.TestCase):
         self.assertEqual(rows["Protocolo API"],
                          "openai-compatible · @ai-sdk/openai-compatible")
 
+    def test_the_provider_id_survives_an_unknown_model(self):
+        """Modelo ausente del catálogo y de opencode.json: la ficha todavía
+        tiene que decir en qué proveedor está mirando."""
+        rows = dict(model_detail_rows(None, provider(), None, None))
+        self.assertEqual(rows["ID del proveedor"], "acme")
+        self.assertEqual(rows["Proveedor"], "Acme AI")
+
 
 class TestAddCatalogModel(unittest.TestCase):
     def test_writes_provider_block_from_catalog_data(self):
