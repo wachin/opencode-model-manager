@@ -38,13 +38,17 @@ import qt_stub  # noqa: E402
 
 qt_stub.install(force=True)
 
-spec = importlib.util.spec_from_file_location(
-    "opencode_model_manager", ROOT / "opencode_model_manager.py"
+sys.path.insert(0, str(ROOT))
+
+# La ventana vive ahora en omm.main_window; el script raíz solo arranca
+# la aplicación y se comprueba por separado.
+import omm.main_window as omm  # noqa: E402
+
+entry_spec = importlib.util.spec_from_file_location(
+    "opencode_model_manager_entry", ROOT / "opencode_model_manager.py"
 )
-if spec is None or spec.loader is None:
-    raise unittest.SkipTest("No se encontró opencode_model_manager.py")
-omm = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(omm)
+entry = importlib.util.module_from_spec(entry_spec)
+entry_spec.loader.exec_module(entry)
 
 qt_stub.QMessageBox.question_reply = (
     qt_stub.QMessageBox.StandardButton.Yes
@@ -55,8 +59,8 @@ qt_stub.QMessageBox.question_reply = (
 # Helpers
 # ------------------------------------------------------------------
 
-def _fresh_window(config_path: Path) -> omm.OpenCodeModelManager:
-    """Construye una ventana sin pasar por __init__ (sin GUI real)."""
+def _minimal_window(config_path: Path) -> omm.OpenCodeModelManager:
+    """Ventana sin GUI real: solo el estado que usan las funciones probadas."""
     window = object.__new__(omm.OpenCodeModelManager)
     window.settings = qt_stub.QSettings("OpenCodeTools", "OpenCodeModelManager")
     window.use_global = True
@@ -66,7 +70,15 @@ def _fresh_window(config_path: Path) -> omm.OpenCodeModelManager:
     window.refresh = lambda: None
     window.statusBar = lambda: _StatusBarRecorder()
     window.lsp_check = qt_stub.QCheckBox("LSP")
+    window.global_check = qt_stub.QCheckBox("Modo global")
+    window._file_fingerprint = None
+    window._current_entry = ("", "")
+    window._current_kind = "model"
     return window
+
+
+def _fresh_window(config_path: Path) -> omm.OpenCodeModelManager:
+    return _minimal_window(config_path)
 
 
 class _StatusBarRecorder:
@@ -403,12 +415,7 @@ class TestLspOption(unittest.TestCase):
                 },
             },
         )
-        self.window = object.__new__(omm.OpenCodeModelManager)
-        self.window.data = {}
-        self.window.config_path = self.config
-        self.window.refresh = lambda: None
-        self.window.statusBar = lambda: _StatusBarRecorder()
-        self.window.lsp_check = qt_stub.QCheckBox("LSP")
+        self.window = _minimal_window(self.config)
 
     def _load(self):
         self.window.data = json.loads(self.config.read_text(encoding="utf-8"))
@@ -551,12 +558,7 @@ class TestLspServerDetection(unittest.TestCase):
                 "provider": {},
             },
         )
-        self.window = object.__new__(omm.OpenCodeModelManager)
-        self.window.data = {}
-        self.window.config_path = self.config
-        self.window.refresh = lambda: None
-        self.window.statusBar = lambda: _StatusBarRecorder()
-        self.window.lsp_check = qt_stub.QCheckBox("LSP")
+        self.window = _minimal_window(self.config)
 
 
 class TestWindowGeometry(unittest.TestCase):
@@ -572,18 +574,9 @@ class TestWindowGeometry(unittest.TestCase):
         qt_stub.QMessageBox.reset()
 
     def _make_window(self) -> omm.OpenCodeModelManager:
-        window = object.__new__(omm.OpenCodeModelManager)
-        window.settings = qt_stub.QSettings(
-            "OpenCodeTools", "OpenCodeModelManager"
+        return _minimal_window(
+            Path(tempfile.mkdtemp()) / "opencode.json"
         )
-        window.use_global = True
-        window.config_path = Path(tempfile.mkdtemp()) / "opencode.json"
-        window.data = {}
-        window.models = []
-        window.refresh = lambda: None
-        window.statusBar = lambda: _StatusBarRecorder()
-        window.lsp_check = qt_stub.QCheckBox("LSP")
-        return window
 
     def test_close_event_saves_geometry(self):
         """Al cerrar, la geometría queda en QSettings."""
@@ -664,53 +657,86 @@ class TestWindowGeometry(unittest.TestCase):
 # ------------------------------------------------------------------
 
 class TestConstraints(unittest.TestCase):
-    def test_auth_json_is_never_touched(self):
-        """auth.json no se lee ni se escribe en ningún punto del código."""
-        source = (ROOT / "opencode_model_manager.py").read_text(
-            encoding="utf-8"
-        )
-        self.assertNotIn("auth_path", source)
-        # El docstring puede mencionar auth.json, pero no debe haber
-        # ninguna operación de archivo sobre él.
-        for pattern in (
-            "auth.json.open",
-            "open(\"*auth.json*\"",
-            "read_text",
-        ):
-            self.assertNotIn("auth.json" + pattern, source)
-        # Solo aparece como documentación.
-        occurrences = source.count("auth.json")
-        self.assertEqual(
-            occurrences, 1,
-            "auth.json solo debe mencionarse en el docstring",
-        )
+    SOURCES = sorted(
+        list(ROOT.glob("*.py"))
+        + list(ROOT.glob("omm/*.py"))
+        + list(ROOT.glob("omm/ui/*.py"))
+    )
 
-    def test_no_new_imports_added(self):
-        """No se añadieron dependencias nuevas al módulo."""
-        source = (ROOT / "opencode_model_manager.py").read_text(
-            encoding="utf-8"
+    def test_every_module_was_scanned(self):
+        """El guardado de restricciones no se queda mirando solo un archivo."""
+        names = {path.name for path in self.SOURCES}
+        for expected in (
+            "opencode_model_manager.py", "main_window.py", "catalog.py",
+            "search.py", "registry.py", "theme.py", "workers.py",
+            "panels.py", "dialogs.py",
+        ):
+            self.assertIn(expected, names)
+
+    def test_auth_json_is_never_touched(self):
+        """Ningún módulo abre, lee ni escribe las credenciales de OpenCode."""
+        io_markers = (
+            "open(", "read_text", "read_bytes", "write_text", "write_bytes",
+            "Path(", "shutil.", "os.path", "glob", "listdir",
         )
+        for path in self.SOURCES:
+            with self.subTest(module=path.name):
+                source = path.read_text(encoding="utf-8")
+                self.assertNotIn("auth_path", source)
+                for line in source.splitlines():
+                    if "auth.json" not in line:
+                        continue
+                    # Solo documentación: nunca una operación de archivos.
+                    for marker in io_markers:
+                        self.assertNotIn(marker, line)
+
+    def test_credentials_module_is_not_imported(self):
+        """Ni siquiera se menciona la ruta de auth.json como constante."""
+        for path in self.SOURCES:
+            source = path.read_text(encoding="utf-8")
+            self.assertNotIn(".local/share/opencode", source)
+
+    def test_no_third_party_imports_beyond_pyqt(self):
+        """El paquete amplió módulos, pero ninguna dependencia nueva."""
         allowed = {
-            "json", "os", "shutil", "subprocess", "sys", "copy",
-            "datetime", "pathlib",
+            "json", "os", "shutil", "sys", "copy", "datetime", "pathlib",
+            "hashlib", "gzip", "io", "urllib", "dataclasses", "typing",
+            "__future__", "functools", "omm",
         }
-        for line in source.splitlines():
-            stripped = line.strip()
-            if stripped.startswith(("import ", "from ")):
-                if "PyQt6" in stripped:
-                    continue
-                # Módulo raíz: "from copy import deepcopy" -> "copy";
-                # "from pathlib import Path" -> "pathlib".
-                if stripped.startswith("from "):
-                    root_import = stripped.split()[1].split(".")[0]
-                else:
-                    root_import = (
-                        stripped.split()[1].rstrip(",").split(".")[0]
+        for path in self.SOURCES:
+            with self.subTest(module=path.name):
+                for line in path.read_text(encoding="utf-8").splitlines():
+                    stripped = line.strip()
+                    if not stripped.startswith(("import ", "from ")):
+                        continue
+                    if "PyQt6" in stripped:
+                        continue
+                    if stripped.startswith("from "):
+                        root_import = stripped.split()[1].split(".")[0]
+                    else:
+                        root_import = (
+                            stripped.split()[1].rstrip(",").split(".")[0]
+                        )
+                    self.assertIn(
+                        root_import, allowed,
+                        f"{path.name}: import inesperado: {stripped}",
                     )
-                self.assertIn(
-                    root_import, allowed,
-                    f"Import inesperado: {stripped}",
-                )
+
+    def test_entry_script_only_boots_the_app(self):
+        """El lanzador sigue siendo ejecutable y no trae la GUI él mismo."""
+        self.assertTrue(callable(entry.main))
+        self.assertNotIn("QMainWindow", entry.__dict__)
+
+    def test_catalog_is_never_written_into_the_config(self):
+        """Ningún modelo del catálogo se escribe sin acción del usuario."""
+        window = _fresh_window(self_config := Path(tempfile.mkdtemp()) / "opencode.json")
+        self_config.parent.mkdir(parents=True, exist_ok=True)
+        self_config.write_text(
+            json.dumps({"$schema": omm.SCHEMA_URL, "provider": {}}),
+            encoding="utf-8",
+        )
+        window.load_config()
+        self.assertEqual(window.data.get("provider"), {})
 
 
 if __name__ == "__main__":
