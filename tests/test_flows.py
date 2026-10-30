@@ -712,7 +712,10 @@ class TestProviderRemoval(_WindowCase):
         self.window.show_provider("zeta")
         self.assertFalse(self.window.details.remove_btn.isEnabled())
         self.assertFalse(self.window.details.edit_btn.isEnabled())
-        self.assertIn("catálogo", self.window.details.remove_btn.toolTip())
+        tip = self.window.details.remove_btn.toolTip()
+        self.assertIn("catálogo", tip)
+        self.assertIn("Abrir…", tip)
+        self.assertIn("Modo global", tip)
         self.assertIn("catálogo", self.window.details.edit_btn.toolTip())
 
     def test_removing_the_provider_drops_its_default_model(self):

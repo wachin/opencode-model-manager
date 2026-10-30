@@ -549,9 +549,13 @@ class DetailsPanel(QWidget):
             why = (
                 "Editar y quitar actúan sobre lo que hay en opencode.json."
                 if registered
-                else "Este proveedor no está en opencode.json: no hay nada "
-                     "que editar ni quitar. En el árbol sigue visible porque "
-                     "viene del catálogo de Models.dev."
+                else "Este proveedor no está en el opencode.json que estás "
+                     "editando (mira la ruta de la cabecera): no hay nada que "
+                     "editar ni quitar. En el árbol sigue visible porque "
+                     "viene del catálogo de Models.dev. Si lo tienes "
+                     "registrado en otro archivo —por ejemplo el "
+                     "opencode.json de un proyecto— ábrelo con «Abrir…» o "
+                     "cambia de modo con «Modo global»."
             )
             self.edit_btn.setToolTip(why)
             self.remove_btn.setToolTip(why)
