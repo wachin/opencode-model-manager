@@ -1,0 +1,50 @@
+# --- Python -----------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Entornos virtuales
+.venv/
+venv/
+
+# --- Herramientas de desarrollo ---------------------------------------------
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# --- Editores y sistema operativo -------------------------------------------
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+
+# --- Qoder: sólo lo local del puesto ----------------------------------------
+# El resto de .qoder/ (reglas y flujos compartidos) sí es del proyecto.
+.qoder/settings.local.json
+.qoder/*.local.json
+
+# --- Boletines de depuración -------------------------------------------------
+# Los sondeos que se escriben en la raíz para ver la app con Qt real.
+.probe_*.py
+*.orig
+*.rej
+
+# --- Secretos y datos de OpenCode --------------------------------------------
+# Esta herramienta no lee auth.json y nunca debería aparecer aquí; se ignora
+# por si alguien prueba con OPENCODE_CONFIG o HOME apuntando al repositorio.
+auth.json
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+/opencode.json
+/opencode-backups/
