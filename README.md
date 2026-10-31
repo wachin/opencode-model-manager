@@ -1,5 +1,7 @@
 # OpenCode API Manager
 
+**Español** · [English](README.en.md)
+
 ![](https://blogger.googleusercontent.com/img/b/R29vZ2xl/AVvXsEisuFUVre-MOxXm1lfvA_mEhp3GC8rcQ93U0N4E1erQ-1kmtIpbNgMbyebyA3SM38NTUuPfAOlmeXF9Fr5RNx2G4cHsWLrjC6wYngr27xBvPOKXzf8RTwnwXrUYT4v2nMLHhyphenhyphenMGBGXPCD-X3gA4QN-MxP8re58d9lEOZ5Srd-satUhSblTyae3uIWr1FlM/s1600-rw/Portada.jpg)
 
 GUI en **Python / PyQt6** para descubrir, comparar y registrar modelos de
@@ -140,7 +142,7 @@ command -v pyright
 Las dos guías siguientes repiten, traducidas, los mismos pasos de
 **Requisitos e instalación** y añaden una comprobación sin pantalla. La
 interfaz del programa sigue en español: se traducen las instrucciones,
-no los botones.
+no los botones. Versión completa en inglés: [README.en.md](README.en.md).
 
 ### English — Run and test from the terminal
 
