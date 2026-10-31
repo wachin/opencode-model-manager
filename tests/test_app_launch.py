@@ -56,6 +56,18 @@ CATALOG_PAYLOAD = {
             },
         },
     },
+    # Proveedor que NO está en el opencode.json abierto: solo catálogo.
+    "zeta": {
+        "id": "zeta", "name": "Zeta AI", "npm": "@ai-sdk/openai-compatible",
+        "api": "https://api.zeta.test/v1", "env": ["ZETA_API_KEY"],
+        "models": {
+            "zeta-big": {
+                "id": "zeta-big", "name": "Zeta Big",
+                "limit": {"context": 8000, "output": 512},
+                "cost": {"input": 0.5, "output": 1.5},
+            },
+        },
+    },
 }
 
 DRIVER = r"""
@@ -215,6 +227,43 @@ report["card_zeta"] = card_state()
 window.show_model("acme", "acme-lite")
 report["card_lite"] = card_state()
 
+# --- por qué una fila no se puede borrar (Qt real) -------------------------
+# El aviso vive en el tooltip de la fila, en una fila visible de la ficha y en
+# el botón gris. Aquí se mide con Qt de verdad, incluido el caso en que la
+# entrada está registrada en OTRO opencode.json (OPENCODE_CONFIG del entorno).
+def tip_of(key):
+    for i in range(window.tree.topLevelItemCount()):
+        item = window.tree.topLevelItem(i)
+        if item.data(0, 257) == key or f"{item.data(0, 257)}/{item.data(0, 258)}" == key:
+            return item.toolTip(0)
+    return ""
+
+
+def child_tip(pid, mid):
+    for i in range(window.tree.topLevelItemCount()):
+        item = window.tree.topLevelItem(i)
+        if item.data(0, 257) != pid:
+            continue
+        item.setExpanded(True)
+        app.processEvents()
+        for j in range(item.childCount()):
+            if item.child(j).data(0, 258) == mid:
+                return item.child(j).toolTip(0)
+    return ""
+
+
+report["tip_acme"] = tip_of("acme")
+report["tip_zeta"] = tip_of("zeta")
+report["tip_zeta_big"] = child_tip("zeta", "zeta-big")
+window.show_provider("zeta")
+zeta_card = card_state()
+report["tip_zeta_card"] = "Desde esta ventana" in zeta_card["texts"]
+report["tip_zeta_note"] = window.details.remove_btn.toolTip()
+report["tip_zeta_enabled"] = window.details.remove_btn.isEnabled()
+report["zeta_badge"] = window.details.badge.text()
+report["open_file"] = str(window.config_path)
+report["foreign_file"] = os.environ.get("OPENCODE_CONFIG", "")
+
 # Sin coincidencias: la lista se queda vacía y el aviso debe verse.
 window.header.search_edit.setText("nada-de-esto-existe")
 window.on_search_changed("nada-de-esto-existe")
@@ -294,6 +343,16 @@ class TestRealAppLaunch(unittest.TestCase):
         )
         cls.auth_bytes = cls.auth.read_bytes()
 
+        # Otro opencode.json, el de un proyecto: aquí sí está «zeta», y la
+        # ventana NO lo está editando. Es el caso que hay que saber explicar.
+        cls.foreign = cls.tmp / "proyecto" / "opencode.json"
+        cls.foreign.parent.mkdir(parents=True)
+        cls.foreign.write_text(
+            json.dumps({"provider": {"zeta": {"name": "Zeta AI",
+                                              "models": {"zeta-big": {}}}}}),
+            encoding="utf-8",
+        )
+
         cache = cls.tmp / "cache" / "opencode-model-manager"
         cache.mkdir(parents=True)
         (cache / "models_dev.json").write_text(
@@ -314,6 +373,7 @@ class TestRealAppLaunch(unittest.TestCase):
             "QT_QPA_PLATFORM": "offscreen",
             "OMM_ROOT": str(ROOT),
             "OMM_CONFIG": str(cls.config),
+            "OPENCODE_CONFIG": str(cls.foreign),
             "PYTHONDONTWRITEBYTECODE": "1",
         }
         driver = cls.tmp / "driver.py"
@@ -436,6 +496,42 @@ class TestRealAppLaunch(unittest.TestCase):
         )
         self.assertIn("Confirmar eliminación", self.report["questions"])
         self.assertIn("Cambios sin guardar", self.report["questions"])
+
+    def test_a_row_that_cannot_be_deleted_says_so_in_real_qt(self):
+        """Con Qt real: la fila del catálogo y la ficha explican el porqué.
+
+        Es el caso B.AI: la entrada estaba en el opencode.json de otro
+        proyecto, la ventana editaba el global, y el usuario veía «Quitar
+        proveedor» gris sin ninguna razón aparente.
+        """
+        open_file = self.report["open_file"]
+        foreign = self.report["foreign_file"]
+        self.assertTrue(foreign, "el conductor no vio el segundo archivo")
+
+        # Registrado en el archivo abierto: se puede actuar, y eso se dice.
+        self.assertIn(f"Registrado en {open_file}", self.report["tip_acme"])
+        self.assertNotIn("no puede borrarlo", self.report["tip_acme"])
+
+        # Solo fila de catálogo en el archivo abierto, pero registrado en otro.
+        for tip in (self.report["tip_zeta"], self.report["tip_zeta_big"],
+                    self.report["tip_zeta_note"]):
+            self.assertIn(open_file, tip)
+            self.assertIn(foreign, tip, "hay que nombrar el archivo ajeno")
+            self.assertIn("Abrir…", tip)
+            self.assertIn("Modo global", tip)
+            self.assertIn("no puede borrarlo", tip)
+
+        # Y sin pasar el puntero: la ficha lo repite como texto visible.
+        self.assertTrue(self.report["tip_zeta_card"])
+        self.assertFalse(
+            self.report["tip_zeta_enabled"],
+            "no se puede quitar lo que no está en el archivo abierto",
+        )
+        self.assertNotIn("Models.dev", self.report["tip_zeta"])
+        self.assertEqual(
+            self.report["zeta_badge"], "Registrado en otro archivo",
+            "llamarlo «Solo catálogo» cuando sí está registrado es mentira",
+        )
 
     # -- tema con Qt real --------------------------------------------------
     def test_light_theme_does_not_inherit_a_dark_desktop(self):

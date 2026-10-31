@@ -64,6 +64,8 @@ class ProviderTreePanel(QTreeWidget):
         self._expanded_ids: set[str] = set()
         self._loaded_ids: set[str] = set()
         self._rows: list[dict] = []
+        self._notes: dict[str, str] = {}
+        self._config_path = ""
         self._configured_brush = QBrush(QColor(LIGHT.success))
 
     def set_configured_color(self, hex_color: str) -> None:
@@ -81,9 +83,17 @@ class ProviderTreePanel(QTreeWidget):
                     child.setForeground(0, self._configured_brush)
 
     # -- datos ------------------------------------------------------------
-    def set_rows(self, rows: list[dict]) -> None:
-        """Reconstruye el árbol (siempre con los hijos PLEGADOS por defecto)."""
+    def set_rows(self, rows: list[dict], notes: dict[str, str] | None = None,
+                 config_path: str = "") -> None:
+        """Reconstruye el árbol (siempre con los hijos PLEGADOS por defecto).
+
+        notes: pid → frase que explica por qué la entrada se puede editar o no
+        desde el archivo abierto. Va en el tooltip de la fila: el aviso de
+        «esto no se borra de aquí» tiene que verse sin pulsar nada.
+        """
         self._rows = rows
+        self._notes = dict(notes or {})
+        self._config_path = config_path
         previous = set(self._expanded_ids)
         self._loaded_ids.clear()
         self.setUpdatesEnabled(False)
@@ -94,16 +104,7 @@ class ProviderTreePanel(QTreeWidget):
             item.setData(0, ROLE_KIND, KIND_PROVIDER)
             item.setData(0, ROLE_PID, row["id"])
             item.setData(0, ROLE_MID, "")
-            tip = (
-                f"ID: {row['id']}\n"
-                f"Protocolo: {row['protocol']}\n"
-                f"SDK: {row['npm'] or '—'}\n"
-                f"Endpoint: {row['base_url'] or '—'}\n"
-                f"Modelos: {row['count']}"
-            )
-            if row["configured"]:
-                tip += "\nRegistrado en opencode.json"
-            item.setToolTip(0, tip)
+            item.setToolTip(0, self._provider_tip(row))
             if row["configured"]:
                 f = item.font(0)
                 f.setBold(True)
@@ -119,6 +120,21 @@ class ProviderTreePanel(QTreeWidget):
             if pid in previous:
                 self._expanded_ids.add(pid)
                 item.setExpanded(True)
+
+    def _provider_tip(self, row: dict) -> str:
+        tip = (
+            f"ID: {row['id']}\n"
+            f"Protocolo: {row['protocol']}\n"
+            f"SDK: {row['npm'] or '—'}\n"
+            f"Endpoint: {row['base_url'] or '—'}\n"
+            f"Modelos: {row['count']}"
+        )
+        note = self._notes.get(row["id"], "")
+        if row["configured"]:
+            tip += f"\nRegistrado en {self._config_path or 'opencode.json'}"
+        if note:
+            tip += "\n" + note
+        return tip
 
     @staticmethod
     def _provider_label(row: dict) -> str:
@@ -144,8 +160,11 @@ class ProviderTreePanel(QTreeWidget):
             child.setData(0, ROLE_PID, pid)
             child.setData(0, ROLE_MID, mrow["id"])
             tip = f"ID: {mrow['id']}"
+            note = self._notes.get(f"{pid}/{mrow['id']}", "")
             if mrow["configured"]:
-                tip += "\nRegistrado en opencode.json"
+                tip += f"\nRegistrado en {self._config_path or 'opencode.json'}"
+            if note:
+                tip += "\n" + note
             child.setToolTip(0, tip)
             if mrow["configured"]:
                 child.setData(0, ROLE_CONFIGURED, True)
@@ -502,7 +521,8 @@ class DetailsPanel(QWidget):
                 widget.deleteLater()
 
     def show_rows(self, title: str, subtitle: str, badge: str, rows,
-                  registered: bool, kind: str = "model") -> None:
+                  registered: bool, kind: str = "model",
+                  action_note: str = "") -> None:
         labels = self._MODE_LABELS.get(kind, self._MODE_LABELS["model"])
         self.title.setText(title)
         self.subtitle.setText(subtitle)
@@ -546,7 +566,7 @@ class DetailsPanel(QWidget):
             self.remove_btn.setEnabled(registered)
             # Un botón gris sin explicación parece un fallo: los proveedores
             # del árbol existen aunque no estén en opencode.json.
-            why = (
+            fallback = (
                 "Editar y quitar actúan sobre lo que hay en opencode.json."
                 if registered
                 else "Este proveedor no está en el opencode.json que estás "
@@ -557,6 +577,7 @@ class DetailsPanel(QWidget):
                      "opencode.json de un proyecto— ábrelo con «Abrir…» o "
                      "cambia de modo con «Modo global»."
             )
+            why = action_note or fallback
             self.edit_btn.setToolTip(why)
             self.remove_btn.setToolTip(why)
         else:
@@ -577,6 +598,15 @@ class DetailsPanel(QWidget):
             )
             self.edit_btn.setEnabled(registered)
             self.remove_btn.setEnabled(registered)
+            why = action_note or (
+                "Editar y quitar actúan sobre lo que hay en opencode.json."
+                if registered
+                else "Este modelo no está en el opencode.json que estás "
+                     "editando: no hay nada que editar ni quitar. Con "
+                     "«Agregar a OpenCode» queda registrado."
+            )
+            self.edit_btn.setToolTip(why)
+            self.remove_btn.setToolTip(why)
 
         has_endpoint = any(
             label == "API / Base URL" and value not in ("", "Desconocida")

@@ -382,6 +382,50 @@ def tree_data(
     return rows
 
 
+# Frases fijas: se comprutan en los tests y salen tal cual en el tooltip del
+# árbol, en la ficha de detalle y en los botones deshabilitados.
+NOTE_REGISTERED = (
+    "Está en {path}: «Editar» y «Quitar» actúan sobre él."
+)
+NOTE_ELSEWHERE = (
+    "{name} no está en {path}, sino en {elsewhere}. Esta ventana no puede "
+    "borrarlo de ahí: ábrelo con «Abrir…» o cambia de modo con «Modo global» "
+    "para editarlo o quitarlo."
+)
+NOTE_CATALOG_ONLY = (
+    "{name} no es tu configuración: es una fila del catálogo de Models.dev. "
+    "En {path} no hay nada que editar ni quitar, así que desde aquí no se "
+    "puede borrar. Si lo registraste en otro archivo, ábrelo con «Abrir…» o "
+    "cambia de modo con «Modo global»."
+)
+
+
+def action_note(
+    name: str,
+    registered: bool,
+    config_path: str,
+    other_files: list[str] | None = None,
+) -> str:
+    """Por qué los mandos de edición funcionan (o no) con esta entrada.
+
+    Un botón gris sin explicación parece un fallo, y una fila del catálogo que
+    no se puede borrar parece un bug. La frase dice siempre el archivo que tiene
+    delante la ventana; si la entrada vive en OTRO opencode.json, se nombra ese
+    archivo para que el usuario sepa dónde tiene que ir a borrarlo.
+    """
+    if registered:
+        return NOTE_REGISTERED.format(path=config_path or "opencode.json")
+    shown = ", ".join(other_files or [])
+    label = name or "Esta entrada"
+    if shown:
+        return NOTE_ELSEWHERE.format(
+            name=label, path=config_path or "opencode.json", elsewhere=shown
+        )
+    return NOTE_CATALOG_ONLY.format(
+        name=label, path=config_path or "opencode.json"
+    )
+
+
 def provider_union(
     catalog_providers: dict[str, ProviderEntry],
     config_data: dict,

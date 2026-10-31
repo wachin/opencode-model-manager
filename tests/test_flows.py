@@ -21,7 +21,7 @@ from omm.main_window import (
 )
 from omm.registry import configured_full_ids
 from omm.search import SCOPE_CONFIGURED, SORT_CONTEXT
-from omm.ui.panels import ROLE_PID
+from omm.ui.panels import ROLE_MID, ROLE_PID
 
 CATALOG = {
     "acme": {
@@ -115,6 +115,10 @@ class _WindowCase(unittest.TestCase):
         })
         patcher.start()
         self.addCleanup(patcher.stop)
+        # OPENCODE_CONFIG manda la búsqueda al archivo REAL del usuario
+        # (discover_config lo mira primero). Un test no debe leerlo nunca:
+        # patch.dict lo devuelve tal cual al parar.
+        os.environ.pop("OPENCODE_CONFIG", None)
 
         qt_stub.QSettings.reset()
         qt_stub.QMessageBox.reset()
@@ -729,6 +733,196 @@ class TestProviderRemoval(_WindowCase):
         self.window.load_config()
         self.assertIn("acme", self.window.providers())
         self.assertEqual(self.window.save_btn.text(), "Guardar")
+
+
+# ---------------------------------------------------------------------------
+# Por qué un mando no actúa con esta entrada
+# ---------------------------------------------------------------------------
+
+class TestEntryOriginIsExplained(_WindowCase):
+    """El caso B.AI: la fila sigue en el árbol y «Quitar» está gris.
+
+    La explicación sale de una sola frase y se pone en tres sitios: el tooltip
+    de la fila del árbol (sin pulsar nada), una fila visible de la ficha (por si
+    el tooltip de un botón deshabilitado no se muestra) y los propios botones.
+    """
+
+    def card_labels(self) -> list[str]:
+        return [
+            label.text()
+            for label in self.window.details.card.findChildren(qt_stub.QLabel)
+        ]
+
+    def other_config(self, data: dict) -> Path:
+        """Otro opencode.json (p. ej. el de un proyecto) + recarga."""
+        other = self.tmp / "proyecto" / "opencode.json"
+        other.parent.mkdir(parents=True, exist_ok=True)
+        other.write_text(json.dumps(data), encoding="utf-8")
+        os.environ["OPENCODE_CONFIG"] = str(other)
+        self.addCleanup(os.environ.pop, "OPENCODE_CONFIG", None)
+        self.window.load_config()
+        return other
+
+    # -- árbol ------------------------------------------------------------
+    def test_a_catalog_row_says_it_cannot_be_deleted_here(self):
+        tip = self.item_by_pid("zeta").toolTip(0)
+        self.assertIn("catálogo de Models.dev", tip)
+        self.assertIn("no se puede borrar", tip)
+        self.assertIn(str(self.config_path), tip)
+
+    def test_a_registered_row_says_the_opposite(self):
+        tip = self.item_by_pid("acme").toolTip(0)
+        self.assertIn(f"Registrado en {self.config_path}", tip)
+        self.assertNotIn("no se puede borrar", tip)
+
+    def test_model_rows_explain_themselves_too(self):
+        for pid, mid, expected in (
+            ("acme", "acme-coder", str(self.config_path)),
+            ("zeta", "zeta-big", "catálogo de Models.dev"),
+        ):
+            top = self.item_by_pid(pid)
+            self.window.tree._load_children(top)
+            child = next(
+                top.child(j) for j in range(top.childCount())
+                if top.child(j).data(0, ROLE_MID) == mid
+            )
+            self.assertIn(expected, child.toolTip(0))
+
+    # -- ficha ------------------------------------------------------------
+    def test_the_card_repeats_the_explanation_without_hovering(self):
+        self.window.show_provider("zeta")
+        labels = self.card_labels()
+        self.assertIn("Desde esta ventana", labels)
+        self.assertIn("catálogo de Models.dev", " ".join(labels))
+
+    def test_the_greyed_buttons_carry_the_same_words(self):
+        self.window.show_provider("zeta")
+        tip = self.window.details.remove_btn.toolTip()
+        self.assertIn("no se puede borrar", tip)
+        self.assertEqual(tip, self.window.details.edit_btn.toolTip())
+
+    def test_a_model_view_is_explained_as_well(self):
+        self.window.show_model("acme", "acme-coder")
+        self.assertIn("Desde esta ventana", self.card_labels())
+        self.assertNotIn(
+            "no se puede borrar", self.window.details.remove_btn.toolTip()
+        )
+
+    # -- y si está en otro archivo ---------------------------------------
+    def test_a_provider_registered_elsewhere_is_pointed_to_that_file(self):
+        other = self.other_config({
+            "provider": {"zeta": {"name": "Zeta", "models": {"zeta-big": {}}}},
+        })
+        self.window.show_provider("zeta")
+        tip = self.window.details.remove_btn.toolTip()
+        self.assertIn(str(other), tip)
+        self.assertIn("no puede borrarlo", tip)
+        self.assertIn(str(self.config_path), tip)
+        self.assertFalse(self.window.details.remove_btn.isEnabled())
+        self.assertIn(str(other), self.item_by_pid("zeta").toolTip(0))
+
+    def test_a_model_registered_elsewhere_is_pointed_too(self):
+        other = self.other_config({
+            "provider": {"zeta": {"models": {"zeta-big": {}}}},
+        })
+        self.window.show_model("zeta", "zeta-big")
+        tip = self.window.details.remove_btn.toolTip()
+        self.assertIn(str(other), tip)
+        self.assertIn(str(self.config_path), tip)
+
+    def test_legacy_providers_key_in_the_other_file_is_understood(self):
+        other = self.other_config({"providers": {"zeta": {"models": {}}}})
+        self.assertIn(str(other), self.window.where_else("zeta"))
+
+    def test_the_badge_stops_lying_when_it_lives_elsewhere(self):
+        other = self.other_config({
+            "provider": {"zeta": {"models": {"zeta-big": {}}}},
+        })
+        self.window.show_provider("zeta")
+        self.assertEqual(
+            self.window.details.badge.text(), "Registrado en otro archivo"
+        )
+        self.assertIn(
+            f"Registrado en otro archivo: {other}", " ".join(self.card_labels())
+        )
+        self.window.show_model("zeta", "zeta-big")
+        self.assertEqual(
+            self.window.details.badge.text(), "Registrado en otro archivo"
+        )
+
+    def test_a_row_that_is_only_catalog_is_still_called_catalog(self):
+        self.window.show_provider("zeta")
+        self.assertEqual(self.window.details.badge.text(), "Solo catálogo")
+        self.assertIn(
+            "Solo en catálogo (no registrado)", " ".join(self.card_labels())
+        )
+        self.window.show_model("zeta", "zeta-big")
+        self.assertEqual(self.window.details.badge.text(), "Solo en el catálogo")
+
+    def test_a_registered_entry_keeps_its_normal_names(self):
+        self.window.show_provider("acme")
+        self.assertEqual(self.window.details.badge.text(), "Proveedor")
+        self.assertIn("Registrado", " ".join(self.card_labels()))
+        self.window.show_model("acme", "acme-coder")
+        self.assertEqual(
+            self.window.details.badge.text(), "Registrado en OpenCode"
+        )
+
+    # -- el atajo «Supr» no pasa por ningún botón gris --------------------
+    def test_the_delete_key_says_the_same_thing_as_the_tooltip(self):
+        self.window.show_provider("zeta")
+        self.window.details_remove()
+        message = self.window.statusBar().currentMessage()
+        self.assertIn("catálogo de Models.dev", message)
+        self.assertIn(str(self.config_path), message)
+        self.assertEqual(qt_stub.QMessageBox.question_calls, [])
+
+    def test_the_delete_key_points_at_the_other_file(self):
+        other = self.other_config({
+            "provider": {"zeta": {"models": {"zeta-big": {}}}},
+        })
+        self.window.show_provider("zeta")
+        self.window.details_remove()
+        message = self.window.statusBar().currentMessage()
+        self.assertIn(str(other), message)
+        self.assertIn("no lo borra de ahí", message)
+
+        self.window.show_model("zeta", "zeta-big")
+        self.window.details_remove()
+        self.assertIn(str(other), self.window.statusBar().currentMessage())
+        self.assertEqual(qt_stub.QMessageBox.question_calls, [])
+
+    # -- lecturas ajenas --------------------------------------------------
+    def test_the_open_file_is_never_relisted_as_foreign(self):
+        self.assertEqual(self.window.other_config_files(), [])
+        other = self.other_config({"provider": {}})
+        paths = self.window.other_config_files()
+        self.assertEqual([str(p) for p in paths], [str(other)])
+        for path in paths:
+            self.assertTrue(path.is_file())
+            self.assertNotEqual(path.name, "auth.json")
+
+    def test_unreadable_foreign_files_are_skipped_quietly(self):
+        broken = self.tmp / "roto.json"
+        broken.write_text("{ esto no es json", encoding="utf-8")
+        self.assertEqual(
+            OpenCodeModelManager._providers_in_file(broken), {}
+        )
+        lista = self.tmp / "lista.json"
+        lista.write_text("[1, 2]", encoding="utf-8")
+        self.assertEqual(
+            OpenCodeModelManager._providers_in_file(lista), {}
+        )
+        self.assertEqual(
+            OpenCodeModelManager._providers_in_file(self.tmp / "no-existe.json"),
+            {},
+        )
+
+    def test_a_foreign_file_without_providers_contributes_nothing(self):
+        self.other_config({"model": "otro/x", "lsp": True})
+        self.assertEqual(self.window._foreign_providers, {})
+        self.window.show_provider("zeta")
+        self.assertNotIn("sino en", self.window.details.remove_btn.toolTip())
 
 
 # ---------------------------------------------------------------------------

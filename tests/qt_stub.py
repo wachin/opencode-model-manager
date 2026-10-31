@@ -1369,6 +1369,7 @@ class QTreeWidgetItem:
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         self._texts: list[str] = []
         self._data: dict[tuple[int, int], Any] = {}
+        self._tips: dict[int, str] = {}
         self._children: list["QTreeWidgetItem"] = []
         self._parent: "QTreeWidgetItem | None" = None
         self._tree: Any = None
@@ -1392,10 +1393,10 @@ class QTreeWidgetItem:
         return self._data.get((column, role))
 
     def setToolTip(self, column: int, tip: str) -> None:
-        pass
+        self._tips[column] = tip
 
     def toolTip(self, column: int) -> str:
-        return ""
+        return self._tips.get(column, "")
 
     def font(self, column: int) -> "QFont":
         return QFont()

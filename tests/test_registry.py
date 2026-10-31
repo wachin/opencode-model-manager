@@ -14,7 +14,8 @@ from support import catalog as _catalog  # noqa: F401  (arranque headless)
 
 from omm.catalog import ModelEntry, Pricing, ProviderEntry
 from omm.registry import (
-    add_catalog_model_to_config, add_provider_to_config, config_providers,
+    action_note, add_catalog_model_to_config, add_provider_to_config,
+    config_providers,
     configured_full_ids, model_detail_rows, provider_from_config,
     provider_union, remove_model_from_config, remove_provider_from_config,
     set_default_model, tree_data, validate_config, validate_provider_spec,
@@ -485,6 +486,60 @@ class TestConfiguredIdsAfterRegister(unittest.TestCase):
         self.assertIn(entry.full_id, configured_full_ids(data))
         remove_model_from_config(data, entry.provider_id, entry.id)
         self.assertNotIn(entry.full_id, configured_full_ids(data))
+
+
+class TestActionNote(unittest.TestCase):
+    """La explicación de por qué un mando funciona o no con cada entrada.
+
+    El caso real que la originó: B.AI seguía en el árbol y el usuario no
+    entendía por qué «Quitar proveedor» estaba gris. La frase tiene que
+    decir siempre qué archivo tiene delante la ventana y, si la entrada vive
+    en otro, cuál es ese archivo.
+    """
+
+    PATH = "/home/x/.config/opencode/opencode.json"
+    OTHER = "/home/x/proyecto/opencode.json"
+
+    def note(self, registered, name="B.AI", others=()):
+        return action_note(name, registered, self.PATH, list(others))
+
+    def test_registered_points_at_the_open_file(self):
+        note = self.note(True)
+        self.assertIn(self.PATH, note)
+        self.assertIn("Editar", note)
+        self.assertIn("Quitar", note)
+
+    def test_a_row_from_the_catalog_is_not_user_configuration(self):
+        note = self.note(False)
+        self.assertIn("catálogo de Models.dev", note)
+        self.assertIn("no se puede borrar", note)
+        self.assertIn(self.PATH, note)
+        # Salidas que el usuario puede ejecutar él mismo.
+        self.assertIn("Abrir…", note)
+        self.assertIn("Modo global", note)
+
+    def test_when_it_lives_elsewhere_the_file_is_named(self):
+        note = self.note(False, others=[self.OTHER])
+        self.assertIn(self.OTHER, note)
+        self.assertIn("B.AI", note)
+        self.assertIn("no puede borrarlo", note)
+        self.assertNotIn("Models.dev", note)
+
+    def test_several_foreign_files_are_all_listed(self):
+        note = self.note(False, others=[self.OTHER, "/tmp/otro/opencode.json"])
+        self.assertIn(self.OTHER, note)
+        self.assertIn("/tmp/otro/opencode.json", note)
+
+    def test_the_note_names_the_entry_and_never_a_secret(self):
+        for note in (self.note(True), self.note(False),
+                     self.note(False, others=[self.OTHER])):
+            self.assertTrue(note.strip())
+            for taboo in ("auth.json", "api key", "apiKey", "sk-"):
+                self.assertNotIn(taboo, note)
+
+    def test_missing_path_or_name_falls_back_without_breaking(self):
+        self.assertIn("opencode.json", action_note("", False, ""))
+        self.assertIn("Esta entrada", action_note("", False, "", ["x"]))
 
 
 if __name__ == "__main__":

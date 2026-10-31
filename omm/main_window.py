@@ -41,6 +41,7 @@ from PyQt6.QtWidgets import (
 
 from omm.catalog import CatalogStore
 from omm.registry import (
+    action_note,
     add_catalog_model_to_config, add_provider_to_config, config_base_url,
     config_providers, configured_full_ids, full_id, model_detail_rows,
     provider_from_config, remove_model_from_config,
@@ -207,6 +208,7 @@ class OpenCodeModelManager(QMainWindow):
         self.worker = None
         self._file_fingerprint = None
         self._saved_json: str | None = None
+        self._foreign_providers: dict[str, list[str]] = {}
         self._current_entry: tuple[str, str] = ("", "")
         self._current_kind = "model"
         self._theme_mode = str(self.settings.value("theme", "auto"))
@@ -582,7 +584,16 @@ class OpenCodeModelManager(QMainWindow):
         )
 
     def update_tree(self):
-        self.tree.set_rows(tree_data(self.catalog.providers, self.data))
+        rows = tree_data(self.catalog.providers, self.data)
+        notes = {}
+        for row in rows:
+            notes[row["id"]] = self.note_for(
+                row["name"], row["configured"], row["id"]
+            )
+            for mrow in row["models"]:
+                key = full_id(row["id"], mrow["id"])
+                notes[key] = self.note_for(mrow["name"], mrow["configured"], key)
+        self.tree.set_rows(rows, notes=notes, config_path=str(self.config_path))
 
     def search_universe(self) -> dict:
         """Catálogo + modelos registrados que no existen en el catálogo.
@@ -750,6 +761,91 @@ class OpenCodeModelManager(QMainWindow):
             model = provider_from_config(pid, pdata).models.get(mid)
         return model, provider, mdata, pdata
 
+    # ------------------------------------------------------------------
+    # Dónde vive cada entrada
+    #
+    # El árbol muestra catálogo ∪ archivo abierto. Cuando una entrada no está
+    # en el archivo abierto hay que poder explicar por qué, y si además está en
+    # OTRO opencode.json, nombrar ese archivo: es lo que permite al usuario ir
+    # a borrarlo. Solo lectura de opencode.json; auth.json no se mira nunca.
+    # ------------------------------------------------------------------
+
+    def other_config_files(self) -> list[Path]:
+        """Archivos de configuración estándar que no son el que está abierto."""
+        candidates = [global_config_path(), discover_config()]
+        custom = os.environ.get("OPENCODE_CONFIG")
+        if custom:
+            candidates.append(Path(custom).expanduser())
+
+        def key(path: Path) -> str:
+            try:
+                return str(Path(path).resolve())
+            except OSError:
+                return str(path)
+
+        current = key(self.config_path)
+        out, seen = [], {current}
+        for candidate in candidates:
+            name = key(candidate)
+            if name in seen:
+                continue
+            seen.add(name)
+            if candidate.is_file():
+                out.append(candidate)
+        return out
+
+    def _refresh_foreign_providers(self) -> None:
+        """Reindexa qué proveedores y modelos ajenos viven en otros archivos."""
+        foreign: dict[str, list[str]] = {}
+        for path in self.other_config_files():
+            for pid, mid_list in self._providers_in_file(path).items():
+                foreign.setdefault(pid, []).append(str(path))
+                for mid in mid_list:
+                    foreign.setdefault(full_id(pid, mid), []).append(str(path))
+        self._foreign_providers = foreign
+
+    @staticmethod
+    def _providers_in_file(path: Path) -> dict[str, list[str]]:
+        """pid → modelos registrados, o {} si el archivo no es legible."""
+        try:
+            with path.open("r", encoding="utf-8") as handle:
+                data = json.load(handle)
+        except Exception:
+            return {}
+        if not isinstance(data, dict):
+            return {}
+        providers = data.get("provider")
+        if not isinstance(providers, dict):
+            providers = data.get("providers")
+        if not isinstance(providers, dict):
+            return {}
+        out: dict[str, list[str]] = {}
+        for pid, pdata in providers.items():
+            models = pdata.get("models") if isinstance(pdata, dict) else None
+            ids = [str(mid) for mid in models] if isinstance(models, dict) else []
+            out[str(pid)] = ids
+        return out
+
+    def where_else(self, key: str) -> list[str]:
+        """Rutas (otros opencode.json) donde está registrada esta entrada."""
+        return self._foreign_providers.get(key, [])
+
+    def entry_state(self, key: str, registered: bool) -> str:
+        """De dónde sale cada entrada: 'here', 'elsewhere' o 'catalog'.
+
+        Llamar «solo catálogo» a algo registrado en el opencode.json de un
+        proyecto es mentira, y es justo lo que despistó con B.AI.
+        """
+        if registered:
+            return "here"
+        return "elsewhere" if self.where_else(key) else "catalog"
+
+    def note_for(self, name: str, registered: bool, key: str) -> str:
+        """Frase que explica por qué se puede —o no— actuar sobre la entrada."""
+        return action_note(
+            name, registered, str(self.config_path), self.where_else(key)
+        )
+
     def show_model(self, pid: str, mid: str) -> None:
         if not pid or not mid:
             return
@@ -764,13 +860,21 @@ class OpenCodeModelManager(QMainWindow):
         self._current_kind = "model"
         self.workspace.setCurrentIndex(PAGE_DETAILS)
         self.header.set_count("")
+        key = full_id(pid, mid)
+        note = self.note_for(title, registered, key)
+        badges = {
+            "here": "Registrado en OpenCode",
+            "elsewhere": "Registrado en otro archivo",
+            "catalog": "Solo en el catálogo",
+        }
         self.details.show_rows(
             title,
-            full_id(pid, mid),
-            "Registrado en OpenCode" if registered else "Solo en el catálogo",
-            rows,
+            key,
+            badges[self.entry_state(key, registered)],
+            rows + [("Desde esta ventana", note)],
             registered,
             "model",
+            note,
         )
 
     def show_provider(self, pid: str) -> None:
@@ -780,6 +884,13 @@ class OpenCodeModelManager(QMainWindow):
         pdata = pdata if isinstance(pdata, dict) else None
         entry = self.catalog.provider(pid) or provider_from_config(pid, pdata)
         registered = pdata is not None
+        state = self.entry_state(pid, registered)
+        where = {
+            "here": "Registrado",
+            "elsewhere": "Registrado en otro archivo: "
+                         + ", ".join(self.where_else(pid)),
+            "catalog": "Solo en catálogo (no registrado)",
+        }[state]
         rows = [
             ("Proveedor", entry.name),
             ("ID del proveedor", pid),
@@ -803,16 +914,21 @@ class OpenCodeModelManager(QMainWindow):
             ),
             (
                 "Configuración en OpenCode",
-                "Registrado" if registered else "Solo en catálogo (no registrado)",
+                where,
             ),
         ]
+        note = self.note_for(entry.name, registered, pid)
+        rows.append(("Desde esta ventana", note))
         self._current_entry = (pid, "")
         self._current_kind = "provider"
         self.workspace.setCurrentIndex(PAGE_DETAILS)
         self.header.set_count("")
         self.details.show_rows(
-            entry.name, pid, "Proveedor" if registered else "Solo catálogo",
-            rows, registered, "provider",
+            entry.name, pid,
+            {"here": "Proveedor",
+             "elsewhere": "Registrado en otro archivo",
+             "catalog": "Solo catálogo"}[state],
+            rows, registered, "provider", note,
         )
 
     # ------------------------------------------------------------------
@@ -1100,6 +1216,25 @@ class OpenCodeModelManager(QMainWindow):
         if self.data.get("small_model") == old_full:
             self.data["small_model"] = new_full
 
+    def _not_here_message(self, label: str, key: str) -> str:
+        """Qué decir cuando piden borrar algo que no está en el archivo abierto.
+
+        Por teclado (Supr) no hay botón gris que frene al usuario: el mensaje
+        tiene que explicar lo mismo que el tooltip y decir dónde sí está.
+        """
+        elsewhere = self.where_else(key)
+        if elsewhere:
+            return (
+                f"«{label}» no está en {self.config_path}, pero sí en "
+                + ", ".join(elsewhere)
+                + ". Esta ventana no lo borra de ahí: ábrelo con «Abrir…» o "
+                  "cambia de modo con «Modo global»."
+            )
+        return (
+            f"«{label}» es solo una fila del catálogo de Models.dev: en "
+            f"{self.config_path} no hay nada que eliminar."
+        )
+
     def delete_model(self, pid: str = "", mid: str = ""):
         current_pid, current_mid = self._current_entry
         pid = pid or current_pid
@@ -1110,8 +1245,7 @@ class OpenCodeModelManager(QMainWindow):
         models = pdata.get("models") if isinstance(pdata, dict) else None
         if not isinstance(models, dict) or mid not in models:
             self.statusBar().showMessage(
-                f"{pid}/{mid} no está registrado en opencode.json: "
-                "no hay nada que eliminar (sigue en el catálogo)."
+                self._not_here_message(full_id(pid, mid), full_id(pid, mid))
             )
             return
         name = model_display_name(mid, models[mid])
@@ -1143,10 +1277,7 @@ class OpenCodeModelManager(QMainWindow):
             return
         providers = self.providers()
         if pid not in providers:
-            self.statusBar().showMessage(
-                "Ese proveedor no está registrado en opencode.json: "
-                "no hay nada que eliminar."
-            )
+            self.statusBar().showMessage(self._not_here_message(pid, pid))
             return
         pdata = providers[pid]
         count = len(pdata.get("models") or {}) if isinstance(pdata, dict) else 0
@@ -1191,6 +1322,7 @@ class OpenCodeModelManager(QMainWindow):
                 self.data = {"$schema": SCHEMA_URL, "provider": {}}
                 self._file_fingerprint = None
                 self._mark_saved()
+                self._refresh_foreign_providers()
                 self.refresh()
             else:
                 self.statusBar().showMessage("Archivo no encontrado.")
@@ -1218,6 +1350,7 @@ class OpenCodeModelManager(QMainWindow):
             return
 
         self._file_fingerprint = file_fingerprint(path)
+        self._refresh_foreign_providers()
         self._sync_checkboxes()
 
         migrated = False

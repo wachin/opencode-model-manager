@@ -317,6 +317,28 @@ pregunta antes de perder los cambios. De ahí que al quitar un proveedor
 su fila siga en el árbol: lo que se va es la marca `●` de registrado, y el
 nombre permanece porque viene del catálogo de Models.dev.
 
+### Por qué «Quitar» está gris, y dónde sí se puede quitar
+
+Cada fila del árbol sale de una de estas tres situaciones, y la ficha lo
+dice con la misma frase en el tooltip de la fila, en una fila visible
+llamada **Desde esta ventana** (por si el tooltip de un botón apagado no
+llega a verse) y en los propios botones:
+
+| Situación | Qué se ve | Qué hacer |
+|---|---|---|
+| Registrado en el archivo abierto | `●` en negrita y ficha con «Proveedor» | Editar y quitar funcionan aquí mismo |
+| Registrado en **otro** `opencode.json` | Badge «Registrado en otro archivo» y la ruta exacta en el aviso | Abrir ese archivo con **Abrir…** o cambiar de modo |
+| Solo fila del catálogo | Badge «Solo catálogo» y «no hay nada que editar ni quitar» | No se borra: es dato de Models.dev, no tu configuración |
+
+El atajo `Supr` repite el aviso por la barra de estado, con la ruta del
+archivo donde sí está, porque por teclado no hay botón gris que frene.
+
+Para poder nombrar ese otro archivo la aplicación **lee** (solo lectura, al
+cargar la configuración) los `opencode.json` estándar que no tiene abiertos:
+el global, el del proyecto según `discover_config()` y el que señale
+`OPENCODE_CONFIG`. Nunca lee `auth.json` ni ningún otro archivo, y una ruta
+ilegible o un JSON roto se ignoran en silencio.
+
 ---
 
 ## Arquitectura del código
@@ -325,7 +347,7 @@ nombre permanece porque viene del catálogo de Models.dev.
 |---|---|
 | `omm/catalog.py` | Dataclasses `ProviderEntry`/`ModelEntry`, semilla, parser de Models.dev, caché con metadatos, procedencia, `adopt()` |
 | `omm/search.py` | `Filters`, coincidencia de texto, filtros por ámbito/protocolo/chips y las cuatro ordenaciones |
-| `omm/registry.py` | Frontera catálogo ↔ configuración: `add_catalog_model_to_config`, `add_provider_to_config`, eliminaciones, `tree_data`, `provider_union`, `model_detail_rows`, validaciones |
+| `omm/registry.py` | Frontera catálogo ↔ configuración: `add_catalog_model_to_config`, `add_provider_to_config`, eliminaciones, `tree_data`, `provider_union`, `model_detail_rows`, `action_note` (por qué un mando no actúa), validaciones |
 | `omm/main_window.py` | Ventana, estado (datos, no widgets), señales entre paneles, flujo de guardado |
 | `omm/ui/panels.py` | Cabecera, árbol perezoso, resultados (con aviso de vacío), filtros, ficha, resumen |
 | `omm/ui/dialogs.py` | Diálogo de proveedor (formulario + importar JSON), de modelo y vista previa |
@@ -493,7 +515,7 @@ El cambio se hace en memoria; se escribe al disco cuando guardas.
 python3 -m unittest discover -s tests -v
 ```
 
-**243 tests** en dos capas, en menos de tres segundos:
+**267 tests** en dos capas, en menos de tres segundos:
 
 - **Headless con stub** (`tests/qt_stub.py`): la lógica de ventana,
   paneles y diálogos corre sin PyQt6, sin ventanas y sin tocar tu
@@ -511,7 +533,15 @@ python3 -m unittest discover -s tests -v
   completo (`TestProviderRemoval`): pide confirmación, deja el archivo
   intacto hasta Guardar, avisa en la barra, marca el botón con `●`,
   descarta el `model` que apuntaba a ese proveedor y, si el proveedor solo
-  está en el catálogo, el botón apagado explica por qué. También vigila la ficha: cada fila
+  está en el catálogo, el botón apagado explica por qué. La procedencia de
+  cada entrada la vigila `TestEntryOriginIsExplained`: el tooltip de la
+  fila, la fila visible de la ficha, el botón apagado y el aviso de `Supr`
+  dicen lo mismo, nombran el archivo concreto cuando la entrada vive en
+  otro `opencode.json` (caso B.AI) y el badge deja de llamar «solo
+  catálogo» a algo registrado fuera. Al escribir ese test apareció un
+  agujero de aislamiento: con `OPENCODE_CONFIG` en el entorno, el fixture
+  podía acabar leyendo el `opencode.json` real del usuario; ahora el
+  `setUp` lo retira. También vigila la ficha: cada fila
   entra con `addLayout`, así que `item.widget()` es `None`; el stub ahora
   replica ese detalle (y el reparenteo que hace Qt) y comprueba que la
   tarjeta contiene exactamente dos etiquetas por fila, vista nueva o
@@ -532,7 +562,11 @@ python3 -m unittest discover -s tests -v
   un proveedor registrado (respondiendo «Sí» a la pregunta) y comprueba
   que el aviso sale en la barra, que el botón pasa a `Guardar ●`, que
   `opencode.json` no se tocó y que al cerrar aparece «Cambios sin
-  guardar». También fuerza una
+  guardar». Con el mismo binario, y con un **segundo** `opencode.json`
+  pasado por `OPENCODE_CONFIG`, lee `toolTip(0)` de las filas del árbol y
+  de sus modelos: la fila registrada dice en qué archivo está, la que vive
+  en el archivo ajeno nombra los dos y el badge pasa a «Registrado en otro
+  archivo». También fuerza una
   **paleta de sistema oscura** y mide píxeles de la ventana pintada: el
   tema claro tiene que salir claro (cabecera, workspace, barra de estado y
   el panel de pestañas del diálogo) y el oscuro oscuro. Se omite solo si
