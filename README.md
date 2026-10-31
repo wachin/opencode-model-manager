@@ -21,7 +21,9 @@ credenciales de `/connect` por separado (en `auth.json`), y esta
 herramienta nunca las lee, muestra ni modifica: puedes cambiar los
 modelos sin volver a introducir la clave. Buscar en el catálogo
 **tampoco** escribe nada: un modelo llega a `opencode.json` solo cuando
-pulsas **Agregar a OpenCode**.
+pulsas **Agregar a OpenCode**. Y la prueba de conexión tampoco pide una
+clave: si eliges **Probar con mi clave**, usa la variable de entorno que
+el proveedor declare, sin mostrarla ni guardarla.
 
 ---
 
@@ -47,6 +49,13 @@ pulsas **Agregar a OpenCode**.
 - **Siete acciones reales** en la ficha: Agregar a OpenCode, Editar,
   Fijar como predeterminado (`model`), Fijar como modelo ligero
   (`small_model`), Copiar ID, Copiar endpoint y Quitar de OpenCode.
+- **Probar la conexión** del proveedor (`Ctrl+T`): un `GET` a su lista de
+  modelos que no gasta tokens y dice qué pasa de verdad (200 con cuántos
+  de tus modelos existen, 401 «vivo pero pide credenciales», 404, DNS,
+  TLS, timeout…). Anónima por defecto; **Probar con mi clave** solo
+  aparece si la variable de entorno declarada existe y la clave nunca se
+  muestra ni se guarda. No sigue redirecciones ni contacta direcciones
+  de metadatos de nube.
 - **Alta de proveedor personalizado** asistida, con pestaña *Importar
   JSON* que valida antes de aceptar nada.
 - Edita `opencode.json` sin tocar `~/.local/share/opencode/auth.json`.
@@ -84,7 +93,8 @@ pulsas **Agregar a OpenCode**.
   `OPENCODE_CONFIG` → `./opencode.json` → búsqueda hacia arriba en un
   repositorio git → `~/.config/opencode/opencode.json`.
 - La red **nunca** bloquea la interfaz: descargar y parsear el catálogo
-  ocurre en un `QThread`, y el resultado llega por señal ya completo.
+  y la prueba de conexión ocurren en un `QThread`, y el resultado llega
+  por señal ya completo.
 
 ---
 
