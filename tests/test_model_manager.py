@@ -773,6 +773,16 @@ class TestConstraints(unittest.TestCase):
         self.assertTrue(callable(entry.main))
         self.assertNotIn("QMainWindow", entry.__dict__)
 
+    def test_the_window_icon_ships_with_the_app(self):
+        """El icono que carga el lanzador existe y es un PNG válido."""
+        icon = ROOT / "omm" / "assets" / "icon.png"
+        self.assertTrue(icon.is_file(), "falta omm/assets/icon.png")
+        self.assertTrue(
+            icon.read_bytes().startswith(b"\x89PNG\r\n\x1a\n"),
+            "el icono no es un PNG",
+        )
+        self.assertEqual(entry.ICON_PATH, icon)
+
     def test_catalog_is_never_written_into_the_config(self):
         """Ningún modelo del catálogo se escribe sin acción del usuario."""
         window = _fresh_window(self_config := Path(tempfile.mkdtemp()) / "opencode.json")

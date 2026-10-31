@@ -17,10 +17,14 @@ Uso:
 """
 
 import sys
+from pathlib import Path
+
+ICON_PATH = Path(__file__).resolve().parent / "omm" / "assets" / "icon.png"
 
 
 def main():
     try:
+        from PyQt6.QtGui import QIcon
         from PyQt6.QtWidgets import QApplication
     except ImportError:
         print("ERROR: PyQt6 no está instalado.")
@@ -32,6 +36,8 @@ def main():
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
     app.setApplicationName(APP_NAME)
+    if ICON_PATH.exists():
+        app.setWindowIcon(QIcon(str(ICON_PATH)))
 
     window = OpenCodeModelManager()
     window.show()
