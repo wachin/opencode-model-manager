@@ -256,6 +256,53 @@ y solo se añaden los datos nuevos.
 
 ---
 
+## Probar la conexión de un proveedor
+
+**Probar conexión** (en la ficha, o `Ctrl+T`) comprueba que el `baseURL`
+responde de verdad. Es una **lectura** de la lista de modelos:
+`GET /models`, o `/v1/models` cuando el `baseURL` no trae ya el sufijo
+—el caso de un servidor local, al que la prueba no le inventa un `/v1`
+de más—. No gasta tokens, no escribe en `opencode.json` ni en la caché y
+no envía ninguna credencial salvo que lo pidas explícitamente.
+
+La ruta la decide el protocolo: `/v1/models` para OpenAI y
+OpenAI-compatible, y el mismo endpoint con `x-api-key` y
+`anthropic-version` para Anthropic. Para Bedrock, Azure u otros el botón
+queda apagado y lo dice: el formato lo define su SDK y un 404 ahí no
+significaría nada.
+
+| Respuesta | Qué enseña la ficha |
+|---|---|
+| 200 con la lista | `Endpoint operativo` · latencia · cuántos modelos anuncia y **cuáles de los tuyos aparecen** |
+| 401 / 403 sin clave | `Endpoint vivo: pide credenciales` — la ruta existe; la clave se pone con `/connect` |
+| 401 / 403 con clave | `El endpoint existe, pero rechaza tu clave` |
+| 404 / 405 | `No expone /v1/models` — el host responde; suele faltar (o sobrar) `/v1` |
+| 429 | vivo, pero saturado |
+| 5xx | el endpoint existe y falla de su lado |
+| DNS / puerto cerrado / timeout / TLS | el motivo exacto, sin adivinar |
+| 3xx | `Redirige fuera de tu baseURL` — la redirección **no** se sigue |
+
+**Probar con mi clave** es un botón aparte y solo aparece si el
+proveedor declara una variable de entorno y esa variable está definida en
+el proceso que lanzó la ventana (si la exportas en `.bashrc`, abre la app
+desde ese terminal; si no, el aviso lo explica). La clave se lee del
+entorno **dentro del hilo**, viaja solo por HTTPS o a loopback —nunca en
+claro a un host remoto— y no se muestra, ni se guarda, ni se escribe: la
+ficha solo dice si te autoriza. La fila *Variables de entorno* nombra cada
+variable como `presente` o `ausente`, jamás su valor.
+
+Reglas que aplica la prueba aunque el endpoint no colabore:
+
+- **No sigue redirecciones**: una `Location` a otro dominio convertiría
+  un 200 aparente en una fuga de la cabecera de autenticación.
+- **Rechaza direcciones de metadatos de nube** (`169.254.169.254`,
+  `metadata.google.internal`…) antes de abrir el socket.
+- **Redacta la clave** en cualquier mensaje que genere, incluso si el
+  servidor la hace eco en un error.
+- No lee `auth.json` y no escribe nada en disco.
+
+---
+
 ## Atajos de teclado
 
 | Tecla | Acción |
@@ -265,6 +312,7 @@ y solo se añaden los datos nuevos.
 | `Ctrl+Shift+R` | Refrescar el catálogo desde Models.dev |
 | `Ctrl+S` | Guardar (valida, respalda y escribe de forma atómica) |
 | `Ctrl+O` | Abrir un `opencode.json` concreto |
+| `Ctrl+T` | Probar la conexión de la ficha abierta |
 | `Esc` | 1º limpia búsqueda **y filtros** · 2º pliega el panel de filtros |
 | `Enter` (en resultados) | Abrir la ficha del modelo resaltado |
 | `Supr` | Quitar de OpenCode, con confirmación |
@@ -286,6 +334,10 @@ Lo que este proyecto garantiza y comprueba en los tests:
   añadido futuro sería opcional y con autorización explícita del usuario.
 - Ninguna clave se pasa por línea de órdenes y ninguna credencial se
   envía a un proveedor de catálogo.
+- La prueba de conexión es anónima salvo que pulses **Probar con mi
+  clave**; en ese caso la clave sale de la variable declarada, solo viaja
+  por HTTPS o a loopback y se redacta de cualquier mensaje. La prueba no
+  sigue redirecciones ni contacta direcciones de metadatos de nube.
 - URLs y datos importados se validan antes de aceptarse; la escritura es
   atómica y **no sobrescribe en silencio**: siempre hay respaldo y aviso
   si el archivo cambió por fuera.
@@ -351,7 +403,8 @@ ilegible o un JSON roto se ignoran en silencio.
 | `omm/main_window.py` | Ventana, estado (datos, no widgets), señales entre paneles, flujo de guardado |
 | `omm/ui/panels.py` | Cabecera, árbol perezoso, resultados (con aviso de vacío), filtros, ficha, resumen |
 | `omm/ui/dialogs.py` | Diálogo de proveedor (formulario + importar JSON), de modelo y vista previa |
-| `omm/workers.py` | `CatalogLoadWorker` (`QThread`): nunca muta el catálogo de la GUI, lo entrega por señal |
+| `omm/workers.py` | `CatalogLoadWorker` y `ProbeWorker` (`QThread`): nunca mutan el estado de la GUI, lo entregan por señal |
+| `omm/probe.py` | Prueba de conexión con solo stdlib: URL por protocolo, rechazo de metadatos y de clave en claro, sin redirecciones, clasificación de DNS/TLS/timeout/HTTP, redacción de la clave y `opener` inyectable para los tests |
 | `omm/theme.py` | Paletas claro/oscuro (con mapa de roles de `QPalette`) y QSS; sin dependencias de Qt |
 
 El paquete se importa desde `opencode_model_manager.py`, que sigue siendo
@@ -515,7 +568,7 @@ El cambio se hace en memoria; se escribe al disco cuando guardas.
 python3 -m unittest discover -s tests -v
 ```
 
-**267 tests** en dos capas, en menos de tres segundos:
+**343 tests** en dos capas, en menos de diez segundos:
 
 - **Headless con stub** (`tests/qt_stub.py`): la lógica de ventana,
   paneles y diálogos corre sin PyQt6, sin ventanas y sin tocar tu
@@ -545,7 +598,22 @@ python3 -m unittest discover -s tests -v
   entra con `addLayout`, así que `item.widget()` es `None`; el stub ahora
   replica ese detalle (y el reparenteo que hace Qt) y comprueba que la
   tarjeta contiene exactamente dos etiquetas por fila, vista nueva o
-  vista repetida. Las restricciones de seguridad
+  vista repetida. La prueba de conexión tiene su propio archivo
+  (`tests/test_probe.py`, sin Qt): un `opener` falso cubre URL por
+  protocolo (Bedrock/Azure se declaran no probables), rechazos (sin URL,
+  host de metadatos, clave en claro), los estados HTTP, la decodificación
+  del cuerpo y la redacción de la clave; y un `http.server` real en
+  bucle local comprueba de punta a punta que un 3xx no se sigue (un
+  segundo servidor registra cero visitas) y que la clave enviada nunca
+  vuelve a aparecer en el informe si el servidor la repite. En los flujos
+  (`TestConnectionProbe`) se mide qué botones se encienden —registrado,
+  solo catálogo, sin endpoint, host de metadatos, bedrock—, la fila de
+  entorno (`presente`/`ausente`, nunca el valor), la fila de resultado en
+  la ficha con lo que falta, que la prueba anónima no lleva credenciales,
+  que el 401 sigue contando como «vivo», que la variante con clave envía
+  `Bearer` sin filtrarlo a la vista ni al disco, que el resultado
+  sobrevive a cambiar de ficha y que no se lanza una segunda prueba
+  mientras corre la primera. Las restricciones de seguridad
   también se prueban: `auth.json` idéntico byte a byte, ninguna clave
   escrita y buscar no registra nada.
 - **Qt auténtico** (`tests/test_app_launch.py`): arranca la aplicación
@@ -566,7 +634,13 @@ python3 -m unittest discover -s tests -v
   pasado por `OPENCODE_CONFIG`, lee `toolTip(0)` de las filas del árbol y
   de sus modelos: la fila registrada dice en qué archivo está, la que vive
   en el archivo ajeno nombra los dos y el badge pasa a «Registrado en otro
-  archivo». También fuerza una
+  archivo». La prueba de conexión se ejecuta con un `ProbeWorker` real: el
+  hilo hace su GET contra un `opener` inyectado, la señal repinta la ficha
+  y la barra, se observa el texto «Probando…» mientras corre, y luego se
+  define la variable del proveedor para la variante con clave: el
+  `Authorization` llega al `opener`, la clave no aparece en ninguna
+  etiqueta, el informe ni el archivo, y `opencode.json` y `auth.json`
+  siguen idénticos. También fuerza una
   **paleta de sistema oscura** y mide píxeles de la ventana pintada: el
   tema claro tiene que salir claro (cabecera, workspace, barra de estado y
   el panel de pestañas del diálogo) y el oscuro oscuro. Se omite solo si

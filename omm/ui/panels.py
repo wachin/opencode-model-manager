@@ -414,6 +414,7 @@ class DetailsPanel(QWidget):
     copy_id_requested = pyqtSignal()
     copy_endpoint_requested = pyqtSignal()
     remove_requested = pyqtSignal()
+    probe_requested = pyqtSignal(bool)  # True → con la clave del entorno
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -474,6 +475,21 @@ class DetailsPanel(QWidget):
             actions.addWidget(b)
         actions.addStretch()
         root.addLayout(actions)
+
+        # La prueba de conexión va en su propia fila: son dos acciones y la
+        # de arriba ya ocupa todo el ancho en pantallas estrechas.
+        probe_row = QHBoxLayout()
+        probe_row.setSpacing(8)
+        self.probe_btn = QPushButton("Probar conexión")
+        self.probe_btn.clicked.connect(lambda: self.probe_requested.emit(False))
+        self.probe_key_btn = QPushButton("Probar con mi clave")
+        self.probe_key_btn.clicked.connect(lambda: self.probe_requested.emit(True))
+        probe_row.addWidget(self.probe_btn)
+        probe_row.addWidget(self.probe_key_btn)
+        probe_row.addStretch()
+        root.addLayout(probe_row)
+        self._probe_info: dict = {}
+        self._probe_busy = False
         root.addStretch()
 
     # Etiquetas según el tipo de entrada: los siete botones existen siempre,
@@ -522,7 +538,7 @@ class DetailsPanel(QWidget):
 
     def show_rows(self, title: str, subtitle: str, badge: str, rows,
                   registered: bool, kind: str = "model",
-                  action_note: str = "") -> None:
+                  action_note: str = "", probe: dict | None = None) -> None:
         labels = self._MODE_LABELS.get(kind, self._MODE_LABELS["model"])
         self.title.setText(title)
         self.subtitle.setText(subtitle)
@@ -617,6 +633,44 @@ class DetailsPanel(QWidget):
             self.copy_url_btn.setToolTip(
                 "El catálogo no conoce el endpoint de este proveedor."
             )
+        self.set_probe(probe)
+
+    # -- prueba de conexión ------------------------------------------------
+    #
+    # El panel no decide nada: main_window calcula si se puede probar, por
+    # qué no, y con qué clave. Así el aviso del botón y la propia prueba
+    # salen de la misma frase y nunca se contradicen.
+    _PROBE_TIP = (
+        "Hace un GET a la lista de modelos del endpoint: no gasta tokens, "
+        "no envía credenciales y no escribe en tu configuración."
+    )
+
+    def set_probe(self, info: dict | None = None) -> None:
+        """Nueva ficha: el estado de la prueba y el resultado, si lo hay."""
+        self._probe_info = dict(info or {})
+        self._probe_busy = False
+        self._apply_probe_state()
+
+    def set_probe_busy(self, busy: bool) -> None:
+        """Mientras el worker habla con el endpoint, los botones esperan."""
+        self._probe_busy = bool(busy)
+        self._apply_probe_state()
+
+    def _apply_probe_state(self) -> None:
+        info = self._probe_info
+        can = bool(info.get("can"))
+        can_key = bool(info.get("can_key"))
+        busy = self._probe_busy
+        why = str(info.get("why") or "")
+        self.probe_btn.setText("Probando…" if busy else "Probar conexión")
+        self.probe_btn.setEnabled(can and not busy)
+        self.probe_btn.setToolTip(why or self._PROBE_TIP)
+        self.probe_key_btn.setEnabled(can and can_key and not busy)
+        self.probe_key_btn.setVisible(can and can_key)
+        self.probe_key_btn.setToolTip(
+            str(info.get("key_why") or "Envía la clave del entorno solo a "
+                "este endpoint, para comprobar que te autoriza.")
+        )
 
 
 class OverviewPanel(QWidget):

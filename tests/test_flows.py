@@ -11,6 +11,7 @@ import os
 import shutil
 import tempfile
 import unittest
+import urllib.error
 from pathlib import Path
 from unittest import mock
 
@@ -1026,6 +1027,260 @@ class TestFilterWiring(_WindowCase):
     def test_small_model_button_is_disabled_for_a_provider(self):
         self.window.show_provider("zeta")
         self.assertFalse(self.window.details.small_btn.isEnabled())
+
+
+# ---------------------------------------------------------------------------
+# Probar conexión
+# ---------------------------------------------------------------------------
+
+class _FakeResponse:
+    """Respuesta mínima: status, cabeceras, read() y close()."""
+
+    def __init__(self, status: int = 200, payload=None) -> None:
+        self.status = status
+        self.code = status
+        self.headers = {}
+        self._body = json.dumps(payload or {}).encode("utf-8")
+
+    def read(self, amount: int = -1) -> bytes:
+        return self._body[:amount] if amount >= 0 else self._body
+
+    def close(self) -> None:
+        pass
+
+
+class _Opener:
+    """opener(request, timeout) fijo: ni red ni sorpresas, y guarda lo enviado."""
+
+    def __init__(self, payload=None, status: int = 200) -> None:
+        self.payload = payload or {"object": "list", "data": [
+            {"id": "acme-coder"}, {"id": "acme-lite"}, {"id": "otro"},
+        ]}
+        self.status = status
+        self.requests: list = []
+
+    def __call__(self, request, timeout):
+        self.requests.append(request)
+        return _FakeResponse(self.status, self.payload)
+
+    def header(self, name: str) -> str:
+        return self.requests[-1].get_header(name) or ""
+
+    def headers(self) -> dict:
+        return {k.lower(): v for k, v in self.requests[-1].header_items()}
+
+
+class TestConnectionProbe(_WindowCase):
+    """«Probar conexión»: se prueba, se explica y no se filtra nada.
+
+    El stub no ejecuta hilos: el test llama a ``run()`` a mano, igual que el
+    worker haría al terminar. La red se sustituye por un opener fijo.
+    """
+
+    TEST_KEY = "sk-proba-NO-DEBE-SALIR"
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.opener = _Opener()
+        self.window.probe_opener = self.opener
+
+    # -- utilidades -------------------------------------------------------
+    def card_labels(self) -> list[str]:
+        return [
+            label.text()
+            for label in self.window.details.card.findChildren(qt_stub.QLabel)
+        ]
+
+    def status(self) -> str:
+        return self.window.statusBar().currentMessage()
+
+    def run_probe(self, with_key: bool = False) -> None:
+        self.window.details_probe(with_key)
+        worker = self.window.probe_worker
+        self.assertIsNotNone(worker, "la prueba no llegó a lanzarse")
+        worker.run()
+        worker.finished.emit()
+
+    def add_provider(self, pid: str, **fields) -> None:
+        from omm.catalog import ProviderEntry
+        self.window.catalog.providers[pid] = ProviderEntry(id=pid, **fields)
+        self.window.update_tree()
+
+    # -- el botón ---------------------------------------------------------
+    def test_a_registered_provider_can_be_probed(self):
+        self.window.show_provider("acme")
+        self.assertTrue(self.window.details.probe_btn.isEnabled())
+        self.assertIn("no gasta tokens", self.window.details.probe_btn.toolTip())
+
+    def test_a_catalog_only_provider_can_be_probed_too(self):
+        self.window.show_provider("zeta")
+        self.assertTrue(self.window.details.probe_btn.isEnabled())
+
+    def test_a_provider_without_endpoint_explains_the_greyed_button(self):
+        self.add_provider("sinapi", name="Sin API", api="")
+        self.window.show_provider("sinapi")
+        self.assertFalse(self.window.details.probe_btn.isEnabled())
+        self.assertIn("No hay URL", self.window.details.probe_btn.toolTip())
+
+    def test_metadata_addresses_are_refused_before_any_request(self):
+        self.add_provider(
+            "nube", name="Nube", api="http://169.254.169.254/latest/meta-data/",
+        )
+        self.window.show_provider("nube")
+        self.assertFalse(self.window.details.probe_btn.isEnabled())
+        self.assertIn("metadatos", self.window.details.probe_btn.toolTip())
+        self.window.details.probe_btn.click()
+        self.window.details_probe(False)
+        self.assertEqual(self.opener.requests, [])
+        self.assertIn("metadatos", self.status())
+
+    def test_an_unsupported_protocol_says_so(self):
+        self.add_provider(
+            "brt", name="Bedrock",
+            npm="@aws-sdk/client-bedrock-runtime",
+            api="https://bedrock-runtime.us-east-1.amazonaws.com",
+        )
+        self.window.show_provider("brt")
+        self.assertFalse(self.window.details.probe_btn.isEnabled())
+        self.assertIn("bedrock", self.window.details.probe_btn.toolTip())
+
+    def test_the_key_button_is_hidden_without_the_variable(self):
+        os.environ.pop("ACME_API_KEY", None)
+        self.window.show_provider("acme")
+        self.assertFalse(self.window.details.probe_key_btn.isVisible())
+
+    def test_the_key_button_appears_when_the_variable_is_present(self):
+        with mock.patch.dict(os.environ, {"ACME_API_KEY": self.TEST_KEY}):
+            self.window.show_provider("acme")
+            self.assertTrue(self.window.details.probe_key_btn.isVisible())
+            self.assertTrue(self.window.details.probe_key_btn.isEnabled())
+            tip = self.window.details.probe_key_btn.toolTip()
+        self.assertIn("ACME_API_KEY", tip)
+        self.assertIn("HTTPS", tip)
+        self.assertNotIn(self.TEST_KEY, tip)
+
+    def test_the_env_row_says_present_or_absent_but_never_the_value(self):
+        os.environ.pop("ACME_API_KEY", None)
+        self.window.show_provider("acme")
+        self.assertIn("ACME_API_KEY (ausente)", self.card_labels())
+        with mock.patch.dict(os.environ, {"ACME_API_KEY": self.TEST_KEY}):
+            self.window.show_provider("acme")
+        joined = " ".join(self.card_labels())
+        self.assertIn("ACME_API_KEY (presente)", joined)
+        self.assertNotIn(self.TEST_KEY, joined)
+
+    # -- la prueba --------------------------------------------------------
+    def test_the_result_is_rendered_in_the_card(self):
+        self.window.show_provider("acme")
+        self.window.details.probe_btn.click()
+        self.assertEqual(self.window.details.probe_btn.text(), "Probando…")
+        self.assertFalse(self.window.details.probe_btn.isEnabled())
+        self.window.probe_worker.run()
+        self.window.probe_worker.finished.emit()
+
+        labels = self.card_labels()
+        self.assertIn("Prueba de conexión", labels)
+        report = next(
+            text for text in labels if text.startswith("Endpoint operativo")
+        )
+        self.assertIn("tus modelos: 1/2", report)
+        self.assertIn("faltan acme-legacy", report)
+        self.assertIn("GET https://api.acme.test/v1/models", report)
+        self.assertIn("Prueba de conexión: Endpoint operativo", self.status())
+        self.assertEqual(self.window.details.probe_btn.text(), "Probar conexión")
+        self.assertTrue(self.window.details.probe_btn.isEnabled())
+
+    def test_the_anonymous_probe_sends_no_credentials(self):
+        self.window.show_provider("acme")
+        self.run_probe()
+        headers = self.opener.headers()
+        self.assertNotIn("authorization", headers)
+        self.assertNotIn("x-api-key", headers)
+
+    def test_the_probe_proves_the_model_in_the_card(self):
+        self.window.show_model("acme", "acme-coder")
+        self.run_probe()
+        report = next(
+            text for text in self.card_labels()
+            if text.startswith("Endpoint operativo")
+        )
+        self.assertIn("tus modelos: 1/1", report)
+        self.assertNotIn("faltan", report)
+
+    def test_a_model_that_the_endpoint_does_not_list_is_named(self):
+        self.opener.payload = {"data": [{"id": "acme-coder"}]}
+        self.window.show_model("acme", "acme-legacy")
+        self.run_probe()
+        report = next(
+            text for text in self.card_labels()
+            if text.startswith("Endpoint operativo")
+        )
+        self.assertIn("faltan acme-legacy", report)
+
+    def test_a_401_without_a_key_is_a_live_endpoint(self):
+        self.opener.status = 401
+        self.window.show_provider("acme")
+        self.run_probe()
+        self.assertIn("pide credenciales", " ".join(self.card_labels()))
+
+    def test_probing_with_the_environment_key(self):
+        self.opener.status = 401
+        with mock.patch.dict(os.environ, {"ACME_API_KEY": self.TEST_KEY}):
+            self.window.show_provider("acme")
+            self.run_probe(with_key=True)
+        self.assertEqual(self.opener.header("Authorization"), f"Bearer {self.TEST_KEY}")
+        joined = " ".join(self.card_labels())
+        self.assertIn("rechaza tu clave", joined)
+        self.assertNotIn(self.TEST_KEY, joined)
+        self.assertNotIn(self.TEST_KEY, self.status())
+
+    def test_the_probe_never_touches_disk(self):
+        before = self.config_path.read_bytes()
+        with mock.patch.dict(os.environ, {"ACME_API_KEY": self.TEST_KEY}):
+            self.window.show_provider("acme")
+            self.run_probe(with_key=True)
+        self.assertEqual(self.config_path.read_bytes(), before)
+        self.assertEqual(self.auth_path.read_bytes(), self.auth_bytes)
+        self.assertEqual(list(self.tmp.rglob("*.tmp")), [])
+
+    def test_the_result_survives_navigation(self):
+        self.window.show_provider("acme")
+        self.run_probe()
+        self.window.show_provider("zeta")
+        self.assertNotIn("Prueba de conexión", self.card_labels())
+        self.window.show_provider("acme")
+        self.assertIn("Prueba de conexión", self.card_labels())
+
+    def test_a_second_probe_is_refused_while_one_is_running(self):
+        class Busy:
+            @staticmethod
+            def isRunning() -> bool:
+                return True
+
+        self.window.show_provider("acme")
+        self.window.probe_worker = Busy()
+        self.window.details_probe(False)
+        self.assertIsInstance(self.window.probe_worker, Busy)
+        self.assertIn("en curso", self.status())
+
+    def test_without_an_open_card_the_shortcut_explains_itself(self):
+        self.window.show_overview()
+        self.window.details_probe(False)
+        self.assertIsNone(self.window.probe_worker)
+        self.assertIn("Abre primero", self.status())
+
+    def test_the_report_never_leaks_the_key_even_if_the_endpoint_echoes_it(self):
+        from omm.probe import probe_endpoint
+        with mock.patch.dict(os.environ, {"ACME_API_KEY": self.TEST_KEY}):
+            self.window.show_provider("acme")
+            result = probe_endpoint(
+                "https://api.acme.test/v1", "openai-compatible",
+                api_key=self.TEST_KEY, env_name="ACME_API_KEY",
+                opener=lambda request, timeout: (_ for _ in ()).throw(
+                    urllib.error.URLError(f"no autorizado: {self.TEST_KEY}")
+                ),
+            )
+        self.assertNotIn(self.TEST_KEY, result.report())
 
 
 if __name__ == "__main__":

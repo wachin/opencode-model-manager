@@ -1,8 +1,9 @@
 """Trabajadores de Qt para red y catálogo sin bloquear la GUI.
 
 Las descargas y el parseo ocurren SIEMPRE fuera del hilo principal.
-Nunca se envían credenciales ni se ejecuta código descargado: se
-transforman datos JSON en estructuras del catálogo.
+Nunca se envían credenciales salvo en la prueba explícita «Probar con mi
+clave», y jamás se ejecuta código descargado: se transforman datos JSON en
+estructuras del catálogo.
 """
 
 from __future__ import annotations
@@ -10,6 +11,10 @@ from __future__ import annotations
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from omm.catalog import CatalogStore
+from omm.probe import (
+    PROBE_TIMEOUT_SECONDS, KIND_ERROR, KIND_NO_ENV, ProbeResult,
+    first_present_env, probe_endpoint,
+)
 
 
 class CatalogLoadWorker(QThread):
@@ -46,3 +51,69 @@ class CatalogLoadWorker(QThread):
                               "last_updated": probe.last_updated})
         except Exception as exc:  # red, JSON, sistema de archivos
             self.failed.emit(str(exc) or exc.__class__.__name__)
+
+
+class ProbeWorker(QThread):
+    """«Probar conexión» en segundo plano; el resultado viaja en la señal.
+
+    Si se pide la prueba con clave, el valor se resuelve AQUÍ dentro desde
+    os.environ: no pasa por el objeto del hilo ni por ninguna señal, y el
+    ProbeResult que sale ya está redactado. No escribe nada en disco.
+    """
+
+    done = pyqtSignal(object)
+
+    def __init__(
+        self,
+        base_url: str,
+        protocol: str = "",
+        env_names=(),
+        with_key: bool = False,
+        wanted_models=(),
+        opener=None,
+        timeout: int = PROBE_TIMEOUT_SECONDS,
+        parent=None,
+    ):
+        super().__init__(parent)
+        self.base_url = base_url
+        self.protocol = protocol
+        self.env_names = tuple(env_names or ())
+        self.with_key = with_key
+        self.wanted_models = tuple(wanted_models or ())
+        self.opener = opener
+        self.timeout = timeout
+
+    def run(self) -> None:
+        api_key, env_name = "", ""
+        if self.with_key:
+            env_name, api_key = first_present_env(self.env_names)
+            if not api_key:
+                declared = ", ".join(self.env_names) or "La variable del proveedor"
+                self.done.emit(ProbeResult(
+                    kind=KIND_NO_ENV,
+                    summary="Sin clave en el entorno",
+                    detail=(
+                        f"{declared} no está definida en el entorno de esta "
+                        "ventana; no hay nada que enviar."
+                    ),
+                    url=self.base_url,
+                ))
+                return
+        try:
+            result = probe_endpoint(
+                self.base_url,
+                protocol=self.protocol,
+                api_key=api_key,
+                env_name=env_name,
+                wanted_models=self.wanted_models,
+                opener=self.opener,
+                timeout=self.timeout,
+            )
+        except Exception as exc:  # ninguna excepción debe dejar el botón «Probando…»
+            result = ProbeResult(
+                kind=KIND_ERROR,
+                summary="La prueba no ha podido completarse",
+                detail=str(exc) or exc.__class__.__name__,
+                url=self.base_url,
+            )
+        self.done.emit(result)

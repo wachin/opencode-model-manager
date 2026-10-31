@@ -39,7 +39,10 @@ from PyQt6.QtWidgets import (
     QStackedWidget, QVBoxLayout, QWidget,
 )
 
-from omm.catalog import CatalogStore
+from omm.catalog import CatalogStore, normalize_base_url, resolve_protocol
+from omm.probe import (
+    env_status, first_present_env, host_of, key_offer, unproposable_reason,
+)
 from omm.registry import (
     action_note,
     add_catalog_model_to_config, add_provider_to_config, config_base_url,
@@ -55,7 +58,7 @@ from omm.ui.panels import (
     DetailsPanel, FilterPanel, HeaderBar, OverviewPanel, ProviderTreePanel,
     SearchResultsPanel,
 )
-from omm.workers import CatalogLoadWorker
+from omm.workers import CatalogLoadWorker, ProbeWorker
 
 
 APP_NAME = "OpenCode API Manager"
@@ -206,6 +209,11 @@ class OpenCodeModelManager(QMainWindow):
         self.catalog = CatalogStore()
         self.filters = Filters()
         self.worker = None
+        self.probe_worker = None
+        # opener inyectable: las pruebas sustituyen urllib por una respuesta
+        # fija sin tocar la red ni el código de producción.
+        self.probe_opener = None
+        self._probe_results: dict = {}
         self._file_fingerprint = None
         self._saved_json: str | None = None
         self._foreign_providers: dict[str, list[str]] = {}
@@ -317,6 +325,7 @@ class OpenCodeModelManager(QMainWindow):
         self.details.copy_id_requested.connect(self.details_copy_id)
         self.details.copy_endpoint_requested.connect(self.details_copy_endpoint)
         self.details.remove_requested.connect(self.details_remove)
+        self.details.probe_requested.connect(self.details_probe)
 
         # ---- barra lateral derecha: árbol proveedor → modelos ----
         sidebar = QFrame()
@@ -467,6 +476,7 @@ class OpenCodeModelManager(QMainWindow):
         ).activated.connect(self.refresh_catalog)
         QShortcut(QKeySequence("Ctrl+S"), self).activated.connect(self.save_config)
         QShortcut(QKeySequence("Ctrl+F"), self).activated.connect(self.focus_search)
+        QShortcut(QKeySequence("Ctrl+T"), self).activated.connect(self.details_probe)
         QShortcut(QKeySequence("Escape"), self).activated.connect(self.escape_pressed)
         QShortcut(QKeySequence("Delete"), self).activated.connect(self.details_remove)
 
@@ -733,7 +743,8 @@ class OpenCodeModelManager(QMainWindow):
             f"<table>{table}</table>"
             "<p>Atajos: Ctrl+F buscar · Esc limpiar · Ctrl+O abrir · "
             "Ctrl+R recargar config · Ctrl+Shift+R refrescar catálogo · "
-            "Ctrl+S guardar · Supr quitar el modelo registrado seleccionado.</p>"
+            "Ctrl+S guardar · Ctrl+T probar conexión · Supr quitar el modelo "
+            "registrado seleccionado.</p>"
             "</div>"
         )
 
@@ -862,6 +873,10 @@ class OpenCodeModelManager(QMainWindow):
         self.header.set_count("")
         key = full_id(pid, mid)
         note = self.note_for(title, registered, key)
+        probe = self.probe_info(pid, mid)
+        if probe["result"]:
+            rows.append(("Prueba de conexión", probe["result"]))
+        rows.append(("Desde esta ventana", note))
         badges = {
             "here": "Registrado en OpenCode",
             "elsewhere": "Registrado en otro archivo",
@@ -871,10 +886,11 @@ class OpenCodeModelManager(QMainWindow):
             title,
             key,
             badges[self.entry_state(key, registered)],
-            rows + [("Desde esta ventana", note)],
+            rows,
             registered,
             "model",
             note,
+            probe,
         )
 
     def show_provider(self, pid: str) -> None:
@@ -897,7 +913,10 @@ class OpenCodeModelManager(QMainWindow):
             ("API / Base URL", config_base_url(pdata) or entry.api or "Desconocida"),
             ("Protocolo de API", entry.protocol),
             ("Paquete del AI SDK", entry.npm or "Desconocido"),
-            ("Variables de entorno", ", ".join(entry.env) or "Sin declaración"),
+            (
+                "Variables de entorno",
+                self._env_summary(self._env_names(entry, pdata)),
+            ),
             (
                 "Modelos en el catálogo",
                 str(len(entry.models)) if entry.models else "Sin modelos conocidos",
@@ -918,6 +937,9 @@ class OpenCodeModelManager(QMainWindow):
             ),
         ]
         note = self.note_for(entry.name, registered, pid)
+        probe = self.probe_info(pid)
+        if probe["result"]:
+            rows.append(("Prueba de conexión", probe["result"]))
         rows.append(("Desde esta ventana", note))
         self._current_entry = (pid, "")
         self._current_kind = "provider"
@@ -928,8 +950,134 @@ class OpenCodeModelManager(QMainWindow):
             {"here": "Proveedor",
              "elsewhere": "Registrado en otro archivo",
              "catalog": "Solo catálogo"}[state],
-            rows, registered, "provider", note,
+            rows, registered, "provider", note, probe,
         )
+
+    # ------------------------------------------------------------------
+    # Prueba de conexión
+    #
+    # El diagnóstico vive en omm/probe.py (solo stdlib) y corre en un hilo.
+    # Aquí solo se decide QUÉ probar y cómo se cuenta en la ficha. La clave
+    # no pasa por este módulo: el worker la lee del entorno dentro del hilo.
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _env_names(entry, pdata=None) -> list[str]:
+        """Variables declaradas (catálogo + archivo), sin duplicados ni valores."""
+        names = [str(name) for name in (getattr(entry, "env", None) or [])]
+        extra = pdata.get("env") if isinstance(pdata, dict) else None
+        if isinstance(extra, list):
+            names += [str(name) for name in extra]
+        return list(dict.fromkeys(name for name in names if name.strip()))
+
+    @staticmethod
+    def _env_summary(names) -> str:
+        """«NOMBRE (presente/ausente)»: nunca el valor de la variable."""
+        status = env_status(names)
+        if not status:
+            return "Sin declaración"
+        return ", ".join(
+            f"{name} ({'presente' if present else 'ausente'})"
+            for name, present in status
+        )
+
+    def probe_info(self, pid: str, mid: str = "") -> dict:
+        """Todo lo que hace falta para pintar la prueba y para lanzarla."""
+        _, provider, _, pdata = self._resolve(pid, mid)
+        endpoint = config_base_url(pdata) or (provider.api if provider else "")
+        protocol = (
+            provider.protocol if provider
+            else resolve_protocol(None, endpoint or None)
+        )
+        blocked = unproposable_reason(endpoint, protocol)
+        names = self._env_names(provider, pdata)
+        can_key, key_why = key_offer(endpoint, protocol, names)
+        if can_key:
+            key_name = first_present_env(names)[0]
+            host = host_of(normalize_base_url(endpoint) or "")
+            key_why = (
+                f"Envía la clave de {key_name} a {host} por HTTPS, solo para "
+                "leer la lista de modelos: no hay cargos y no se guarda nada."
+            )
+        entry = full_id(pid, mid) if mid else pid
+        result = self._probe_results.get(entry)
+        return {
+            "can": not blocked,
+            "why": blocked or (
+                "Hace un GET a la lista de modelos: no gasta tokens ni "
+                "escribe nada. La petición es anónima salvo que uses "
+                "«Probar con mi clave»."
+            ),
+            "can_key": can_key,
+            "key_why": key_why,
+            "result": result.report() if result is not None else "",
+            "endpoint": endpoint,
+            "protocol": protocol,
+            "env_names": names,
+            "wanted": (
+                [mid] if mid
+                else [str(model) for model in ((pdata or {}).get("models") or {})]
+            ),
+            "entry": entry,
+        }
+
+    def details_probe(self, with_key: bool = False) -> None:
+        """Lanza la prueba en un hilo; nunca bloquea la GUI ni toca disco."""
+        pid, mid = self._current_entry
+        if not pid or self.workspace.currentIndex() != PAGE_DETAILS:
+            self.statusBar().showMessage(
+                "Abre primero un proveedor o un modelo para probar su conexión."
+            )
+            return
+        if self.probe_worker is not None and self.probe_worker.isRunning():
+            self.statusBar().showMessage("Ya hay una prueba de conexión en curso.")
+            return
+        info = self.probe_info(pid, mid)
+        if not info["can"]:
+            self.statusBar().showMessage(info["why"])
+            return
+        if with_key and not info["can_key"]:
+            self.statusBar().showMessage(info["key_why"])
+            return
+        self.details.set_probe_busy(True)
+        self.statusBar().showMessage(f"Probando {info['endpoint']}…")
+        worker = ProbeWorker(
+            info["endpoint"],
+            protocol=info["protocol"],
+            env_names=info["env_names"],
+            with_key=with_key,
+            wanted_models=info["wanted"],
+            opener=self.probe_opener,
+        )
+        entry = info["entry"]
+        worker.done.connect(lambda result: self._on_probe_done(entry, result))
+        worker.finished.connect(self._on_probe_finished)
+        self.probe_worker = worker
+        worker.start()
+
+    def _on_probe_done(self, entry: str, result) -> None:
+        self._probe_results[entry] = result
+        self.statusBar().showMessage(f"Prueba de conexión: {result.line()}")
+        if entry == self._current_key():
+            self._reshow_current()
+
+    def _on_probe_finished(self) -> None:
+        self.probe_worker = None
+        self.details.set_probe_busy(False)
+
+    def _current_key(self) -> str:
+        pid, mid = self._current_entry
+        return full_id(pid, mid) if pid and mid else pid
+
+    def _reshow_current(self) -> None:
+        """Repinta la ficha actual con el resultado de la prueba ya dentro."""
+        pid, mid = self._current_entry
+        if not pid:
+            return
+        if self._current_kind == "model" and mid:
+            self.show_model(pid, mid)
+        else:
+            self.show_provider(pid)
 
     # ------------------------------------------------------------------
     # Acciones del panel de detalle

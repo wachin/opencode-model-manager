@@ -747,7 +747,7 @@ class TestConstraints(unittest.TestCase):
         allowed = {
             "json", "os", "shutil", "sys", "copy", "datetime", "pathlib",
             "hashlib", "gzip", "io", "urllib", "dataclasses", "typing",
-            "__future__", "functools", "omm",
+            "__future__", "functools", "socket", "ssl", "time", "omm",
         }
         for path in self.SOURCES:
             with self.subTest(module=path.name):

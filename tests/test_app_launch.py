@@ -35,6 +35,8 @@ CONFIG = {
 }
 
 SECRET = "sk-NADEBE-MOVERSE"
+# Clave que el conductor pone en ACME_API_KEY para la prueba explícita.
+PROBE_KEY = "sk-QT-PRUEBA-NO-DEBE-SALIR"
 
 # Caché de Models.dev que la aplicación cargará en el arranque (offline).
 CATALOG_PAYLOAD = {
@@ -264,6 +266,89 @@ report["zeta_badge"] = window.details.badge.text()
 report["open_file"] = str(window.config_path)
 report["foreign_file"] = os.environ.get("OPENCODE_CONFIG", "")
 
+# --- probar la conexión, con Qt real ---------------------------------------
+# El worker es un QThread auténtico: hay que bombear el bucle hasta que
+# publica el resultado. La red se sustituye por un opener fijo, así que
+# aquí se mide el hilo, la señal y el repintado, no el socket.
+import json as _json  # noqa: E402
+
+auth_path = Path(os.environ["XDG_DATA_HOME"]) / "opencode" / "auth.json"
+auth_before = auth_path.read_bytes() if auth_path.is_file() else b""
+disk_before = config_path.read_bytes()
+
+
+class _FakeResponse:
+    status = 200
+    code = 200
+    headers = {}
+
+    def __init__(self, payload):
+        self._body = _json.dumps(payload).encode()
+
+    def read(self, amount=-1):
+        return self._body[:amount] if amount >= 0 else self._body
+
+    def close(self):
+        pass
+
+
+sent = []
+
+
+def fake_opener(request, timeout):
+    sent.append({
+        "url": request.full_url,
+        "authorization": request.get_header("Authorization") or "",
+        "api_key": request.get_header("x-api-key") or "",
+    })
+    return _FakeResponse({"object": "list",
+                          "data": [{"id": "acme-coder"}, {"id": "otro"}]})
+
+
+def pump_probe(limit=10.0):
+    deadline = time.monotonic() + limit
+    while window.probe_worker is not None and time.monotonic() < deadline:
+        app.processEvents()
+        time.sleep(0.01)
+    app.processEvents()
+
+
+def probe_card():
+    pump_probe()
+    return [label.text() for label in window.details.card.findChildren(QLabel)]
+
+
+window.probe_opener = fake_opener
+window.show_provider("acme")
+report["probe_enabled"] = window.details.probe_btn.isEnabled()
+report["probe_label"] = window.details.probe_btn.text()
+window.details.probe_btn.click()
+report["probe_busy_label"] = window.details.probe_btn.text()
+report["probe_card"] = probe_card()
+report["probe_status"] = window.statusBar().currentMessage()
+report["probe_sent"] = list(sent)
+report["probe_label_after"] = window.details.probe_btn.text()
+
+# La clave sale del entorno del proceso, como cuando se lanza la app desde
+# un terminal que la exporta. Nunca debe llegar a la ficha ni al archivo.
+os.environ["ACME_API_KEY"] = os.environ["OMM_PROBE_KEY"]
+window.show_provider("acme")
+report["probe_key_visible"] = window.details.probe_key_btn.isVisible()
+report["probe_key_tip"] = window.details.probe_key_btn.toolTip()
+window.details.probe_key_btn.click()
+key_card = probe_card()
+report["probe_key_card"] = key_card
+report["probe_key_sent"] = sent[-1]["authorization"] if sent else ""
+report["probe_key_leak"] = bool(
+    any(os.environ["OMM_PROBE_KEY"] in text for text in key_card)
+    or os.environ["OMM_PROBE_KEY"] in window.statusBar().currentMessage()
+)
+report["probe_disk_same"] = config_path.read_bytes() == disk_before
+report["probe_auth_same"] = (
+    auth_path.read_bytes() if auth_path.is_file() else b""
+) == auth_before
+
+
 # Sin coincidencias: la lista se queda vacía y el aviso debe verse.
 window.header.search_edit.setText("nada-de-esto-existe")
 window.on_search_changed("nada-de-esto-existe")
@@ -373,6 +458,7 @@ class TestRealAppLaunch(unittest.TestCase):
             "QT_QPA_PLATFORM": "offscreen",
             "OMM_ROOT": str(ROOT),
             "OMM_CONFIG": str(cls.config),
+            "OMM_PROBE_KEY": PROBE_KEY,
             "OPENCODE_CONFIG": str(cls.foreign),
             "PYTHONDONTWRITEBYTECODE": "1",
         }
@@ -531,6 +617,46 @@ class TestRealAppLaunch(unittest.TestCase):
         self.assertEqual(
             self.report["zeta_badge"], "Registrado en otro archivo",
             "llamarlo «Solo catálogo» cuando sí está registrado es mentira",
+        )
+
+    # -- probar la conexión con Qt real ------------------------------------
+    def test_the_probe_runs_in_a_real_thread_and_repaints_the_card(self):
+        """El botón, el QThread, la señal y la fila visible, todo de verdad."""
+        self.assertTrue(self.report["probe_enabled"])
+        self.assertEqual(self.report["probe_label"], "Probar conexión")
+        self.assertEqual(self.report["probe_busy_label"], "Probando…")
+        self.assertEqual(self.report["probe_label_after"], "Probar conexión")
+
+        card = self.report["probe_card"]
+        self.assertIn("Prueba de conexión", card)
+        report_text = next(
+            text for text in card if text.startswith("Endpoint operativo")
+        )
+        self.assertIn("GET https://api.acme.test/v1/models", report_text)
+        self.assertIn("Endpoint operativo", self.report["probe_status"])
+
+        self.assertEqual(len(self.report["probe_sent"]), 1)
+        anon = self.report["probe_sent"][0]
+        self.assertEqual(anon["url"], "https://api.acme.test/v1/models")
+        self.assertEqual(anon["authorization"], "")
+        self.assertEqual(anon["api_key"], "")
+
+    def test_the_key_probe_is_explicit_and_never_shows_the_key(self):
+        """La clave solo viaja si el usuario pulsa el botón y la variable existe."""
+        self.assertTrue(self.report["probe_key_visible"])
+        self.assertIn("ACME_API_KEY", self.report["probe_key_tip"])
+        self.assertIn("HTTPS", self.report["probe_key_tip"])
+        self.assertEqual(
+            self.report["probe_key_sent"], f"Bearer {PROBE_KEY}",
+            "la clave del entorno debe viajar en la cabecera de esa petición",
+        )
+        self.assertFalse(
+            self.report["probe_key_leak"],
+            "la clave no puede aparecer en la ficha ni en la barra de estado",
+        )
+        self.assertTrue(self.report["probe_disk_same"], "la prueba no escribe")
+        self.assertTrue(
+            self.report["probe_auth_same"], "la prueba no toca auth.json"
         )
 
     # -- tema con Qt real --------------------------------------------------
