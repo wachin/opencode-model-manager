@@ -458,6 +458,7 @@ class TestRealAppLaunch(unittest.TestCase):
             "QT_QPA_PLATFORM": "offscreen",
             "OMM_ROOT": str(ROOT),
             "OMM_CONFIG": str(cls.config),
+            "OMM_LANG": "es",
             "OMM_PROBE_KEY": PROBE_KEY,
             "OPENCODE_CONFIG": str(cls.foreign),
             "PYTHONDONTWRITEBYTECODE": "1",

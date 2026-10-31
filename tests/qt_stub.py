@@ -578,6 +578,9 @@ class QComboBox(QWidget):
     def setItemData(self, index: int, data: Any) -> None:
         self._items[index] = (self._items[index][0], data)
 
+    def setItemText(self, index: int, text: str) -> None:
+        self._items[index] = (str(text), self._items[index][1])
+
     def count(self) -> int:
         return len(self._items)
 

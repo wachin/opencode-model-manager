@@ -148,14 +148,14 @@ in `PATH`:
   LSP as disabled** until you install it and restart OpenCode:
 
   ```text
-  Servidor LSP no encontrado
-  ─────────────────────────
-  LSP se guardará como activado, pero falta el servidor del lenguaje
-  en el PATH...
+  LSP server not found
+  ────────────────────
+  LSP will be saved as enabled, but the language server is missing
+  from PATH...
     • pyright  →  npm install -g pyright
   ```
 
-  (The dialog is in Spanish: “LSP server not found. LSP will be saved as
-  enabled, but the language server is missing from PATH…”)
+  (In Spanish: “Servidor LSP no encontrado. LSP se guardará como
+  activado, pero falta el servidor del lenguaje en el PATH…”.)
 
 When you untick the checkbox, the `"lsp"` key is removed from the file.

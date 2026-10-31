@@ -4,8 +4,10 @@
 
 This page covers the interface, the catalog, search and filters, the model
 card, the custom-provider dialog, the connection test and the keyboard
-shortcuts. UI labels appear in Spanish, as the app shows them, usually
-with an English gloss.
+shortcuts. **The interface ships in English and Spanish**: English is the
+default and the language selector in the header switches to Spanish
+immediately, without restarting. Labels below are quoted in English with
+the Spanish text in parentheses.
 
 ---
 
@@ -27,9 +29,10 @@ Three zones, with a `QSplitter` between the workspace and the tree:
 ```
 
 - **Header**: app name, path of the active `opencode.json`, search with a
-  160 ms debounce, **Filtros** (“Filters”) button (collapsible), sort
-  order, match counter and the action buttons (Open, Reload, Refresh
-  catalog, +Provider, +Model, Preview, Theme, Copy file, Save).
+  160 ms debounce, **Filters** (**Filtros**) button (collapsible), sort
+  order, match counter, language selector (English / Español) and the
+  action buttons (Open, Reload, Refresh catalog, +Provider, +Model,
+  Preview, Theme, Copy file, Save).
 - **Provider tree** (right column, draggable between 210 and 560 px):
   alphabetical order, **always collapsed on startup and when rebuilt
   after saving**; children are created only on expand, so thousands of
@@ -37,8 +40,8 @@ Three zones, with a `QSplitter` between the workspace and the tree:
   `opencode.json`; green `✓` = model already registered; no mark =
   catalog only. The number in parentheses is the model count.
 - **Model card**: a click on a result or on the tree fills it; if there
-  are no matches, the list shows the notice «Sin coincidencias con esta
-  búsqueda y filtros.» (“No matches for this search and filters.”) instead
+  are no matches, the list shows the notice “No matches for this search
+  and filters.” («Sin coincidencias con esta búsqueda y filtros.») instead
   of staying empty. The view is capped (up to 300 rows) but the counter
   always reports the real total.
 
@@ -52,7 +55,7 @@ Three zones, with a `QSplitter` between the workspace and the tree:
 | Local seed | B.AI, Ollama, LM Studio, llama-server and OpenRouter |
 | On-disk cache | `$XDG_CACHE_HOME/opencode-model-manager/models_dev.json` + `models_dev.meta.json` (with `fetched_at`, `source` and `license`) |
 | Startup | A thread loads the cache and publishes the catalog by signal; with no network you keep browsing offline |
-| Update | **Refrescar catálogo** (“Refresh catalog”) button or `Ctrl+Shift+R` (downloads and rewrites the cache) |
+| Update | **Refresh catalog** (**Refrescar catálogo**) button or `Ctrl+Shift+R` (downloads and rewrites the cache) |
 | Provenance | Every provider/model reports `seed`, `models.dev`, `config` or `cache`; Models.dev wins over the seed |
 
 Rules the code follows and the tests enforce:
@@ -80,7 +83,7 @@ endpoint/`baseURL`, description, family, type and modalities.
 |---|---|
 | Scope | All · Registered in OpenCode · Not registered |
 | Protocol | Any protocol · OpenAI-compatible · OpenAI · Anthropic · Google · Other |
-| Location | **Locales** (“Local”) checkbox (Ollama, LM Studio, llama.cpp…) |
+| Location | **Local** (**Locales**) checkbox (Ollama, LM Studio, llama.cpp…) |
 | Model (chips) | Free · Paid · Free tier · Code · Reasoning · Vision · Tool calling · Multimodal · Context ≥ 200k |
 | Order | A → Z · Provider · Context · Price, with an ↑↓ button to reverse |
 
@@ -90,10 +93,10 @@ endpoint/`baseURL`, description, family, type and modalities.
   not only those literally named `other`.
 - **Context** sorts from largest to smallest by default; models with an
   unknown context always end up last. **Price** sorts by the combined
-  input/output cost, with `Gratis` (“Free”) as 0 and unpriced models last.
+  input/output cost, with `Free` (**Gratis**) as 0 and unpriced models last.
 - A model is **not** marked as multimodal or vision-capable if the
-  catalog does not declare its modalities: we prefer `Desconocido`
-  (“Unknown”) to guessing.
+  catalog does not declare its modalities: we prefer `Unknown`
+  (**Desconocido**) to guessing.
 
 ---
 
@@ -101,16 +104,16 @@ endpoint/`baseURL`, description, family, type and modalities.
 
 | Field | No data |
 |---|---|
-| Context window / Maximum output | `Desconocido` (“Unknown”) |
-| Tool calling · Reasoning · Vision · Streaming · Modalities | `Desconocido` (“Unknown”) |
-| Price | `Sin datos de precio` (“No price data”) (or `Gratis` if 0/0) |
-| Status in OpenCode | `Registrado` (“Registered”) or `Solo en catálogo (no registrado)` (“Catalog only (not registered)”) |
+| Context window / Maximum output | `Unknown` (**Desconocido**) |
+| Tool calling · Reasoning · Vision · Streaming · Modalities | `Unknown` (**Desconocido**) |
+| Price | `No price data` (**Sin datos de precio**) (or `Free` / **Gratis** if 0/0) |
+| Status in OpenCode | `Registered` (**Registrado**) or `Catalog only (not registered)` (**Solo en catálogo (no registrado)**) |
 
 The **API / Base URL** row uses the `baseURL` from your configuration when
 it exists; only if the provider is not registered does it show the
 catalog endpoint.
 
-**Quitar de OpenCode** (“Remove from OpenCode”) deletes the entry from
+**Remove from OpenCode** (**Quitar de OpenCode**) deletes the entry from
 `opencode.json` (with confirmation) but leaves the catalog entry intact,
 so you can register it again whenever you want.
 
@@ -118,16 +121,16 @@ so you can register it again whenever you want.
 
 ## Registering a custom provider
 
-**+ Proveedor** button: a dialog with two tabs.
+**+ Provider** (**+ Proveedor**) button: a dialog with two tabs.
 
-1. **Formulario** (“Form”) — provider ID (it must match the one you used
+1. **Form** (**Formulario**) — provider ID (it must match the one you used
    in `/connect`), visible name, Base URL, protocol, AI SDK `npm`,
    authentication environment variable, custom headers (`Key: value` per
    line) and the initial model(s).
-2. **Importar JSON** (“Import JSON”) — paste the `opencode.json` block,
-   the bare provider object (with `"id"`) or a list, press **Validar**
-   (“Validate”) and, if it is correct, **Aplicar al formulario** (“Apply
-   to form”).
+2. **Import JSON** (**Importar JSON**) — paste the `opencode.json` block,
+   the bare provider object (with `"id"`) or a list, press **Validate**
+   (**Validar**) and, if it is correct, **Apply to form** (**Aplicar al
+   formulario**).
 
 Validation rejects a missing ID, a Base URL that is not a valid
 `http(s)` URL, an empty name, malformed headers, unknown keys and models
@@ -143,7 +146,7 @@ the new data is added.
 
 ## Testing a provider's connection
 
-**Probar conexión** (“Test connection”, on the card, or `Ctrl+T`) checks
+**Test connection** (**Probar conexión**, on the card, or `Ctrl+T`) checks
 that the `baseURL` really responds. It is a **read** of the model list:
 `GET /models`, or `/v1/models` when the `baseURL` does not already end in
 that suffix — the case of a local server, for which the test does not
@@ -159,25 +162,25 @@ button stays disabled and says so: their SDK defines the format, and a
 
 | Response | What the card reports |
 |---|---|
-| 200 with the list | `Endpoint operativo` (“Endpoint healthy”) · latency · how many models it announces and **which of yours appear** |
-| 401 / 403 without a key | `Endpoint vivo: pide credenciales` (“Endpoint alive: asks for credentials”) — the route exists; the key is set with `/connect` |
-| 401 / 403 with a key | `El endpoint existe, pero rechaza tu clave` (“The endpoint exists, but rejects your key”) |
-| 404 / 405 | `No expone /v1/models` (“Does not expose /v1/models”) — the host responds; usually `/v1` is missing (or extra) |
+| 200 with the list | `Endpoint working` (**Endpoint operativo**) · latency · how many models it announces and **which of yours appear** |
+| 401 / 403 without a key | `Endpoint alive: it asks for credentials` (**Endpoint vivo: pide credenciales**) — the route exists; the key is set with `/connect` |
+| 401 / 403 with a key | `The endpoint exists, but it rejects your key` (**El endpoint existe, pero rechaza tu clave**) |
+| 404 / 405 | `Does not expose /v1/models` (**No expone /v1/models**) — the host responds; usually `/v1` is missing (or extra) |
 | 429 | alive, but saturated |
 | 5xx | the endpoint exists and fails on its side |
 | DNS / closed port / timeout / TLS | the exact reason, no guessing |
-| 3xx | `Redirige fuera de tu baseURL` (“Redirects outside your baseURL”) — the redirect is **not** followed |
+| 3xx | `Redirects outside your baseURL` (**Redirige fuera de tu baseURL**) — the redirect is **not** followed |
 
-**Probar con mi clave** (“Test with my key”) is a separate button and only
+**Test with my key** (**Probar con mi clave**) is a separate button and only
 appears if the provider declares an environment variable and that
 variable is defined in the process that launched the window (if you
 export it in `.bashrc`, open the app from that terminal; otherwise the
 notice explains it). The key is read from the environment **inside the
 thread**, travels only over HTTPS or to loopback — never in cleartext to a
 remote host — and is never shown, stored or written: the card only says
-whether it authorizes you. The *Variables de entorno* (“Environment
-variables”) row names each variable as `presente` (“present”) or
-`ausente` (“absent”), never its value.
+whether it authorizes you. The *Environment variables* (*Variables de
+entorno*) row names each variable as `present` (**presente**) or
+`absent` (**ausente**), never its value.
 
 Rules the test applies even if the endpoint does not cooperate:
 

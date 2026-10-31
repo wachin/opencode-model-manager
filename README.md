@@ -44,7 +44,10 @@ OpenCode”).
   `auth.json`, never shows or stores API keys and never sends them to a
   catalog provider.
 
-> The interface is in Spanish; the documentation is in English.
+> The interface is available in **English and Spanish**: English is the
+> default and the language selector in the header switches instantly, with
+> the choice remembered. `OMM_LANG=es` on the command line forces Spanish.
+> The documentation is in English.
 
 ## Quick start
 
@@ -86,7 +89,7 @@ For a headless check (SSH/CI), the test suite and a Portuguese guide, see
 | [Configuration](docs/configuration.md) | Global vs repository mode, saving and backups, external changes, greyed-out removal, migration, LSP |
 | [Security](docs/security.md) | Credential rules and what the tests guarantee |
 | [Architecture](docs/architecture.md) | Modules and design rules |
-| [Tests](docs/testing.md) | The 344-test suite in its two layers |
+| [Tests](docs/testing.md) | The 357-test suite in its two layers |
 | [Terminal](docs/terminal.md) | Install, headless check and Portuguese guide |
 | [Background](docs/background.md) | Why it exists: OpenCode and free B.AI models |
 

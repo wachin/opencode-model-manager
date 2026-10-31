@@ -40,6 +40,9 @@ from PyQt6.QtWidgets import (
 )
 
 from omm.catalog import CatalogStore, normalize_base_url, resolve_protocol
+from omm.i18n import (
+    format_int, get_language, init_language, set_language, tr, trn,
+)
 from omm.probe import (
     env_status, first_present_env, host_of, key_offer, unproposable_reason,
 )
@@ -150,7 +153,8 @@ def discover_config() -> Path:
 def file_info(path: Path) -> tuple[str, str]:
     """(tamaño legible, fecha de modificación) del archivo de configuración."""
     if not path.exists():
-        return "(no existe)", "(no existe)"
+        missing = tr("(does not exist)", es="(no existe)")
+        return missing, missing
     st = path.stat()
     size = st.st_size
     if size < 1024:
@@ -197,6 +201,7 @@ class OpenCodeModelManager(QMainWindow):
         self._fit_to_screen()
 
         self.settings = QSettings("OpenCodeTools", "OpenCodeModelManager")
+        init_language(self.settings)
         self._restore_window_geometry()
 
         self.use_global = bool(self.settings.value("use_global", True, type=bool))
@@ -224,6 +229,7 @@ class OpenCodeModelManager(QMainWindow):
         self.build_ui()
         self.setup_shortcuts()
         self.apply_theme()
+        self.retranslate_ui()
         self._load_catalog_cache()
         self.load_config()
 
@@ -290,6 +296,7 @@ class OpenCodeModelManager(QMainWindow):
         self.header.search_changed.connect(self.on_search_changed)
         self.header.sort_changed.connect(self.on_sort_changed)
         self.header.filters_toggled.connect(self.toggle_filter_panel)
+        self.header.language_changed.connect(self.change_language)
 
         # ---- panel de filtros (plegable) ----
         self.filter_panel = FilterPanel()
@@ -334,16 +341,20 @@ class OpenCodeModelManager(QMainWindow):
         side_layout.setContentsMargins(10, 10, 10, 10)
         side_layout.setSpacing(6)
 
-        side_title = QLabel("Proveedores")
-        side_title.setObjectName("sectionTitle")
-        side_layout.addWidget(side_title)
+        self.side_title = QLabel()
+        self.side_title.setObjectName("sectionTitle")
+        side_layout.addWidget(self.side_title)
 
-        hint = QLabel(
-            "Clic para desplegar · ● proveedor registrado · ✓ modelo registrado"
-        )
-        hint.setObjectName("hintLabel")
-        hint.setWordWrap(True)
-        side_layout.addWidget(hint)
+        self.side_hint = QLabel()
+        self.side_hint.setObjectName("hintLabel")
+        self.side_hint.setWordWrap(True)
+        self.side_hint.setToolTip(tr(
+            "Click a provider to expand its models. ● registered provider · "
+            "✓ registered model.",
+            es="Haz clic en un proveedor para desplegar sus modelos. "
+               "● proveedor registrado · ✓ modelo registrado.",
+        ))
+        side_layout.addWidget(self.side_hint)
 
         self.tree = ProviderTreePanel()
         side_layout.addWidget(self.tree, 1)
@@ -361,65 +372,44 @@ class OpenCodeModelManager(QMainWindow):
         self.splitter.setSizes(self._restored_splitter_sizes())
         root.addWidget(self.splitter, 1)
 
-        self.statusBar().showMessage("Listo.")
+        self.statusBar().showMessage(tr("Ready.", es="Listo."))
         self._sync_checkboxes()
 
     def _build_header_actions(self):
-        self.open_btn = QPushButton("Abrir…")
+        self.open_btn = QPushButton()
         self.open_btn.setObjectName("ghost")
-        self.open_btn.setToolTip("Abrir un opencode.json concreto (Ctrl+O).")
         self.open_btn.clicked.connect(self.open_config)
 
-        self.reload_btn = QPushButton("Recargar")
+        self.reload_btn = QPushButton()
         self.reload_btn.setObjectName("ghost")
-        self.reload_btn.setToolTip("Volver a leer el archivo actual.")
         self.reload_btn.clicked.connect(self.load_config)
 
-        self.refresh_catalog_btn = QPushButton("Refrescar catálogo")
+        self.refresh_catalog_btn = QPushButton()
         self.refresh_catalog_btn.setObjectName("ghost")
-        self.refresh_catalog_btn.setToolTip(
-            "Descargar Models.dev en segundo plano.\n"
-            "La petición es anónima: no se envían credenciales."
-        )
         self.refresh_catalog_btn.clicked.connect(self.refresh_catalog)
 
-        self.provider_btn = QPushButton("+ Proveedor")
+        self.provider_btn = QPushButton()
         self.provider_btn.setObjectName("primary")
-        self.provider_btn.setToolTip(
-            "Alta guiada o importación JSON de un proveedor externo.\n"
-            "La API key se introduce aparte, con /connect."
-        )
         self.provider_btn.clicked.connect(self.add_provider)
 
-        self.add_model_btn = QPushButton("+ Modelo")
+        self.add_model_btn = QPushButton()
         self.add_model_btn.setObjectName("ghost")
-        self.add_model_btn.setToolTip(
-            "Registrar un modelo a mano en el proveedor seleccionado."
-        )
         self.add_model_btn.clicked.connect(lambda: self.add_model())
 
-        self.preview_btn = QPushButton("Vista previa")
+        self.preview_btn = QPushButton()
         self.preview_btn.setObjectName("ghost")
-        self.preview_btn.setToolTip("Ver el JSON que se escribiría al guardar.")
         self.preview_btn.clicked.connect(self.show_preview)
 
-        self.theme_btn = QPushButton("Tema: auto")
+        self.theme_btn = QPushButton()
         self.theme_btn.setObjectName("ghost")
-        self.theme_btn.setToolTip("Alterna auto → claro → oscuro.")
         self.theme_btn.clicked.connect(self.toggle_theme)
 
-        self.backup_btn = QPushButton("Copiar archivo")
+        self.backup_btn = QPushButton()
         self.backup_btn.setObjectName("ghost")
-        self.backup_btn.setToolTip(
-            "Crear ahora una copia fechada del opencode.json del disco."
-        )
         self.backup_btn.clicked.connect(self.create_backup)
 
-        self.save_btn = QPushButton("Guardar")
+        self.save_btn = QPushButton()
         self.save_btn.setObjectName("primary")
-        self.save_btn.setToolTip(
-            "Valida, respalda y guarda opencode.json (Ctrl+S)."
-        )
         self.save_btn.clicked.connect(self.save_config)
 
         for widget in (
@@ -429,23 +419,111 @@ class OpenCodeModelManager(QMainWindow):
         ):
             self.header.row1.addWidget(widget)
 
-        self.global_check = QCheckBox("Modo global")
-        self.global_check.setToolTip(
-            "Trabajar siempre sobre ~/.config/opencode/opencode.json "
-            "en lugar del opencode.json del repositorio actual."
-        )
+        self.global_check = QCheckBox()
         self.global_check.stateChanged.connect(self.toggle_global_mode)
 
-        self.lsp_check = QCheckBox("LSP")
-        self.lsp_check.setToolTip(
-            "Activa o desactiva los servidores LSP de OpenCode (clave \"lsp\"\n"
-            "de opencode.json). Requiere tener instalado el servidor del\n"
-            "lenguaje; para Python: npm install -g pyright"
-        )
+        self.lsp_check = QCheckBox()
         self.lsp_check.stateChanged.connect(self.toggle_lsp)
 
         self.header.row2.addWidget(self.global_check)
         self.header.row2.addWidget(self.lsp_check)
+
+    def retranslate_ui(self):
+        """Reaplica el idioma a los textos estáticos y repinta la vista actual."""
+        self.side_title.setText(tr("Providers", es="Proveedores"))
+        self.side_hint.setText(tr(
+            "Click to expand · ● registered provider · ✓ registered model",
+            es="Clic para desplegar · ● proveedor registrado · ✓ modelo registrado",
+        ))
+        self.side_hint.setToolTip(tr(
+            "Click a provider to expand its models. ● registered provider · "
+            "✓ registered model.",
+            es="Haz clic en un proveedor para desplegar sus modelos. "
+               "● proveedor registrado · ✓ modelo registrado.",
+        ))
+        self.open_btn.setText(tr("Open…", es="Abrir…"))
+        self.open_btn.setToolTip(tr(
+            "Open a specific opencode.json (Ctrl+O).",
+            es="Abrir un opencode.json concreto (Ctrl+O).",
+        ))
+        self.reload_btn.setText(tr("Reload", es="Recargar"))
+        self.reload_btn.setToolTip(tr(
+            "Read the current file again.",
+            es="Volver a leer el archivo actual.",
+        ))
+        self.refresh_catalog_btn.setText(tr("Refresh catalog", es="Refrescar catálogo"))
+        self.refresh_catalog_btn.setToolTip(tr(
+            "Download Models.dev in the background.\n"
+            "The request is anonymous: no credentials are sent.",
+            es="Descargar Models.dev en segundo plano.\n"
+               "La petición es anónima: no se envían credenciales.",
+        ))
+        self.provider_btn.setText(tr("+ Provider", es="+ Proveedor"))
+        self.provider_btn.setToolTip(tr(
+            "Guided setup or JSON import for an external provider.\n"
+            "The API key is entered separately, with /connect.",
+            es="Alta guiada o importación JSON de un proveedor externo.\n"
+               "La API key se introduce aparte, con /connect.",
+        ))
+        self.add_model_btn.setText(tr("+ Model", es="+ Modelo"))
+        self.add_model_btn.setToolTip(tr(
+            "Register a model by hand for the selected provider.",
+            es="Registrar un modelo a mano en el proveedor seleccionado.",
+        ))
+        self.preview_btn.setText(tr("Preview", es="Vista previa"))
+        self.preview_btn.setToolTip(tr(
+            "See the JSON that would be written when saving.",
+            es="Ver el JSON que se escribiría al guardar.",
+        ))
+        self.theme_btn.setToolTip(tr(
+            "Switches auto → light → dark.", es="Alterna auto → claro → oscuro."))
+        self.backup_btn.setText(tr("Copy file", es="Copiar archivo"))
+        self.backup_btn.setToolTip(tr(
+            "Create a dated copy of opencode.json on disk now.",
+            es="Crear ahora una copia fechada del opencode.json del disco.",
+        ))
+        self.global_check.setText(tr("Global mode", es="Modo global"))
+        self.global_check.setToolTip(tr(
+            "Always work on ~/.config/opencode/opencode.json instead of the "
+            "current repository's opencode.json.",
+            es="Trabajar siempre sobre ~/.config/opencode/opencode.json "
+               "en lugar del opencode.json del repositorio actual.",
+        ))
+        self.lsp_check.setText("LSP")
+        self.lsp_check.setToolTip(tr(
+            "Enables or disables OpenCode's LSP servers (the \"lsp\" key in\n"
+            "opencode.json). The language server must be installed;\n"
+            "for Python: npm install -g pyright",
+            es="Activa o desactiva los servidores LSP de OpenCode (clave \"lsp\"\n"
+               "de opencode.json). Requiere tener instalado el servidor del\n"
+               "lenguaje; para Python: npm install -g pyright",
+        ))
+        self._apply_theme_label()
+        self._update_save_button()
+        self.header.retranslate()
+        self.filter_panel.retranslate()
+        self.overview.title.setText(tr("Overview", es="Resumen"))
+        self.refresh()
+        self.statusBar().showMessage(tr("Ready.", es="Listo."))
+
+    def change_language(self, code: str) -> None:
+        """Cambia el idioma en caliente y recuerda la elección."""
+        code = set_language(code)
+        self.settings.setValue("language", code)
+        self.retranslate_ui()
+
+    def _theme_label(self) -> str:
+        names = {
+            "en": {"auto": "Auto", "light": "Light", "dark": "Dark"},
+            "es": {"auto": "auto", "light": "claro", "dark": "oscuro"},
+        }
+        mode = self._theme_mode if self._theme_mode in names["en"] else "auto"
+        return tr("Theme: {mode}", es="Tema: {mode}").format(
+            mode=names[get_language()][mode]
+        )
+
+    def _apply_theme_label(self) -> None:
+        self.theme_btn.setText(self._theme_label())
 
     def _sync_checkboxes(self):
         """Refleja el estado cargado sin disparar señales."""
@@ -541,7 +619,7 @@ class OpenCodeModelManager(QMainWindow):
         target = app if app is not None else self
         target.setStyleSheet(build_stylesheet(palette))
         self.tree.set_configured_color(palette.success)
-        self.theme_btn.setText(f"Tema: {self._theme_mode}")
+        self._apply_theme_label()
         if self.workspace.currentIndex() == PAGE_OVERVIEW:
             self.overview.show_summary(self._overview_html())
 
@@ -554,11 +632,15 @@ class OpenCodeModelManager(QMainWindow):
 
     def refresh_catalog(self):
         if self.worker is not None and self.worker.isRunning():
-            self.statusBar().showMessage(
-                "Ya hay una descarga del catálogo en curso."
-            )
+            self.statusBar().showMessage(tr(
+                "A catalog download is already running.",
+                es="Ya hay una descarga del catálogo en curso.",
+            ))
             return
-        self.statusBar().showMessage("Descargando catálogo de Models.dev…")
+        self.statusBar().showMessage(tr(
+            "Downloading the Models.dev catalog…",
+            es="Descargando catálogo de Models.dev…",
+        ))
         self._start_worker(refresh_remote=True)
 
     def _start_worker(self, refresh_remote: bool):
@@ -580,18 +662,22 @@ class OpenCodeModelManager(QMainWindow):
         self.update_tree()
         self.update_view()
         if source == "remote":
-            self.statusBar().showMessage(
-                f"Catálogo actualizado: {self.catalog.model_count} modelos de "
-                f"{len(self.catalog.providers)} proveedores."
-            )
+            self.statusBar().showMessage(tr(
+                "Catalog updated: {models} models from {providers} providers.",
+                es="Catálogo actualizado: {models} modelos de "
+                   "{providers} proveedores.",
+            ).format(models=self.catalog.model_count,
+                     providers=len(self.catalog.providers)))
         else:
             self.statusBar().showMessage(self.catalog.describe_source())
 
     def _on_catalog_failed(self, message):
-        self.statusBar().showMessage(
-            f"No se pudo actualizar el catálogo ({message}). "
-            "Se sigue usando la copia local."
-        )
+        self.statusBar().showMessage(tr(
+            "The catalog could not be updated ({error}). "
+            "The local copy is still being used.",
+            es="No se pudo actualizar el catálogo ({error}). "
+               "Se sigue usando la copia local.",
+        ).format(error=message))
 
     def update_tree(self):
         rows = tree_data(self.catalog.providers, self.data)
@@ -691,9 +777,12 @@ class OpenCodeModelManager(QMainWindow):
         self.workspace.setCurrentIndex(PAGE_RESULTS)
 
         summary = filters.summary()
-        note = f"{total} coincidencia{'s' if total != 1 else ''}"
+        note = trn(total, "{count} match", "{count} matches",
+                   es_one="{count} coincidencia", es_many="{count} coincidencias"
+                   ).format(count=total)
         if len(found) < total:
-            note += f" · mostrando {len(found)}"
+            note += tr(" · showing {shown}", es=" · mostrando {shown}").format(
+                shown=len(found))
         if summary:
             note += f" · {summary}"
         self.header.set_count(note)
@@ -711,19 +800,26 @@ class OpenCodeModelManager(QMainWindow):
             if isinstance(pdata, dict)
         )
         size, mtime = file_info(self.config_path)
+        mode = (tr("global", es="global") if self.use_global
+                else tr("repository", es="repositorio"))
         rows = [
-            ("Archivo", str(self.config_path)),
+            (tr("File", es="Archivo"), str(self.config_path)),
             (
-                "Modo",
-                f"{'global' if self.use_global else 'repositorio'} · "
-                f"{size} · modificado {mtime}",
+                tr("Mode", es="Modo"),
+                tr("{mode} · {size} · modified {time}",
+                   es="{mode} · {size} · modificado {time}").format(
+                       mode=mode, size=size, time=mtime),
             ),
-            ("Proveedores registrados", str(len(providers))),
-            ("Modelos registrados", str(model_count)),
-            ("model", str(self.data.get("model") or "(sin predeterminado)")),
-            ("small_model", str(self.data.get("small_model") or "(automático)")),
-            ("LSP", "activado" if self.data.get("lsp") else "desactivado"),
-            ("Catálogo", self.catalog.describe_source()),
+            (tr("Registered providers", es="Proveedores registrados"),
+             str(len(providers))),
+            (tr("Registered models", es="Modelos registrados"), str(model_count)),
+            ("model", str(self.data.get("model") or tr(
+                "(no default)", es="(sin predeterminado)"))),
+            ("small_model", str(self.data.get("small_model") or tr(
+                "(automatic)", es="(automático)"))),
+            ("LSP", tr("enabled", es="activado") if self.data.get("lsp")
+             else tr("disabled", es="desactivado")),
+            (tr("Catalog", es="Catálogo"), self.catalog.describe_source()),
         ]
         table = "".join(
             "<tr>"
@@ -732,19 +828,37 @@ class OpenCodeModelManager(QMainWindow):
             f"<td>{value}</td></tr>"
             for key, value in rows
         )
+        intro = tr(
+            "Type in the search bar to explore providers and models "
+            "(<b>Ctrl+F</b>). Expand a provider in the right panel to see "
+            "its models.",
+            es="Escribe en la barra de búsqueda para explorar proveedores y "
+               "modelos (<b>Ctrl+F</b>). Despliega un proveedor en el panel "
+               "derecho para ver sus modelos.",
+        )
+        boundary = tr(
+            "A catalog entry is <b>not</b> added to your configuration until "
+            "you press “Add to OpenCode”, and credentials are still managed "
+            "with /connect.",
+            es="Una entrada del catálogo <b>no</b> se añade a tu "
+               "configuración hasta que pulses «Agregar a OpenCode», y las "
+               "credenciales siguen gestionándose con /connect.",
+        )
+        shortcuts = tr(
+            "Shortcuts: Ctrl+F search · Esc clear · Ctrl+O open · Ctrl+R "
+            "reload config · Ctrl+Shift+R refresh catalog · Ctrl+S save · "
+            "Ctrl+T test connection · Del remove the selected registered model.",
+            es="Atajos: Ctrl+F buscar · Esc limpiar · Ctrl+O abrir · Ctrl+R "
+               "recargar config · Ctrl+Shift+R refrescar catálogo · Ctrl+S "
+               "guardar · Ctrl+T probar conexión · Supr quitar el modelo "
+               "registrado seleccionado.",
+        )
         return (
             "<div style='line-height:150%'>"
-            "<p>Escribe en la barra de búsqueda para explorar proveedores y "
-            "modelos (<b>Ctrl+F</b>). Despliega un proveedor en el panel "
-            "derecho para ver sus modelos.</p>"
-            "<p>Una entrada del catálogo <b>no</b> se añade a tu "
-            "configuración hasta que pulses «Agregar a OpenCode», y las "
-            "credenciales siguen gestionándose con /connect.</p>"
+            f"<p>{intro}</p>"
+            f"<p>{boundary}</p>"
             f"<table>{table}</table>"
-            "<p>Atajos: Ctrl+F buscar · Esc limpiar · Ctrl+O abrir · "
-            "Ctrl+R recargar config · Ctrl+Shift+R refrescar catálogo · "
-            "Ctrl+S guardar · Ctrl+T probar conexión · Supr quitar el modelo "
-            "registrado seleccionado.</p>"
+            f"<p>{shortcuts}</p>"
             "</div>"
         )
 
@@ -875,12 +989,14 @@ class OpenCodeModelManager(QMainWindow):
         note = self.note_for(title, registered, key)
         probe = self.probe_info(pid, mid)
         if probe["result"]:
-            rows.append(("Prueba de conexión", probe["result"]))
-        rows.append(("Desde esta ventana", note))
+            rows.append((tr("Connection test", es="Prueba de conexión"),
+                         probe["result"]))
+        rows.append((tr("From this window", es="Desde esta ventana"), note))
         badges = {
-            "here": "Registrado en OpenCode",
-            "elsewhere": "Registrado en otro archivo",
-            "catalog": "Solo en el catálogo",
+            "here": tr("Registered in OpenCode", es="Registrado en OpenCode"),
+            "elsewhere": tr("Registered in another file",
+                            es="Registrado en otro archivo"),
+            "catalog": tr("Catalog only", es="Solo en el catálogo"),
         }
         self.details.show_rows(
             title,
@@ -902,54 +1018,64 @@ class OpenCodeModelManager(QMainWindow):
         registered = pdata is not None
         state = self.entry_state(pid, registered)
         where = {
-            "here": "Registrado",
-            "elsewhere": "Registrado en otro archivo: "
-                         + ", ".join(self.where_else(pid)),
-            "catalog": "Solo en catálogo (no registrado)",
+            "here": tr("Registered", es="Registrado"),
+            "elsewhere": tr("Registered in another file: {files}",
+                            es="Registrado en otro archivo: {files}").format(
+                                files=", ".join(self.where_else(pid))),
+            "catalog": tr("Catalog only (not registered)",
+                          es="Solo en catálogo (no registrado)"),
         }[state]
         rows = [
-            ("Proveedor", entry.name),
-            ("ID del proveedor", pid),
-            ("API / Base URL", config_base_url(pdata) or entry.api or "Desconocida"),
-            ("Protocolo de API", entry.protocol),
-            ("Paquete del AI SDK", entry.npm or "Desconocido"),
+            (tr("Provider", es="Proveedor"), entry.name),
+            (tr("Provider ID", es="ID del proveedor"), pid),
+            ("API / Base URL", config_base_url(pdata) or entry.api
+             or tr("Unknown", es="Desconocida")),
+            (tr("API protocol", es="Protocolo de API"), entry.protocol),
+            (tr("AI SDK package", es="Paquete del AI SDK"),
+             entry.npm or tr("Unknown", es="Desconocido")),
             (
-                "Variables de entorno",
+                tr("Environment variables", es="Variables de entorno"),
                 self._env_summary(self._env_names(entry, pdata)),
             ),
             (
-                "Modelos en el catálogo",
-                str(len(entry.models)) if entry.models else "Sin modelos conocidos",
+                tr("Models in the catalog", es="Modelos en el catálogo"),
+                str(len(entry.models)) if entry.models
+                else tr("No known models", es="Sin modelos conocidos"),
             ),
             (
-                "Modelos registrados",
+                tr("Registered models", es="Modelos registrados"),
                 str(len(pdata.get("models") or {})) if registered else "0",
             ),
-            ("Documentación", entry.doc or "No disponible"),
+            (tr("Documentation", es="Documentación"),
+             entry.doc or tr("Not available", es="No disponible")),
             (
-                "Credenciales",
-                "Se gestionan con /connect; esta herramienta no las lee "
-                "ni las escribe.",
+                tr("Credentials", es="Credenciales"),
+                tr("They are managed with /connect; this tool does not read "
+                   "or write them.",
+                   es="Se gestionan con /connect; esta herramienta no las lee "
+                      "ni las escribe."),
             ),
             (
-                "Configuración en OpenCode",
+                tr("Configuration in OpenCode", es="Configuración en OpenCode"),
                 where,
             ),
         ]
         note = self.note_for(entry.name, registered, pid)
         probe = self.probe_info(pid)
         if probe["result"]:
-            rows.append(("Prueba de conexión", probe["result"]))
-        rows.append(("Desde esta ventana", note))
+            rows.append((tr("Connection test", es="Prueba de conexión"),
+                         probe["result"]))
+        rows.append((tr("From this window", es="Desde esta ventana"), note))
         self._current_entry = (pid, "")
         self._current_kind = "provider"
         self.workspace.setCurrentIndex(PAGE_DETAILS)
         self.header.set_count("")
         self.details.show_rows(
             entry.name, pid,
-            {"here": "Proveedor",
-             "elsewhere": "Registrado en otro archivo",
-             "catalog": "Solo catálogo"}[state],
+            {"here": tr("Provider", es="Proveedor"),
+             "elsewhere": tr("Registered in another file",
+                             es="Registrado en otro archivo"),
+             "catalog": tr("Catalog only", es="Solo catálogo")}[state],
             rows, registered, "provider", note, probe,
         )
 
@@ -975,10 +1101,12 @@ class OpenCodeModelManager(QMainWindow):
         """«NOMBRE (presente/ausente)»: nunca el valor de la variable."""
         status = env_status(names)
         if not status:
-            return "Sin declaración"
+            return tr("Not declared", es="Sin declaración")
+        present = tr("present", es="presente")
+        absent = tr("absent", es="ausente")
         return ", ".join(
-            f"{name} ({'presente' if present else 'ausente'})"
-            for name, present in status
+            f"{name} ({present if present_ else absent})"
+            for name, present_ in status
         )
 
     def probe_info(self, pid: str, mid: str = "") -> dict:
@@ -995,18 +1123,23 @@ class OpenCodeModelManager(QMainWindow):
         if can_key:
             key_name = first_present_env(names)[0]
             host = host_of(normalize_base_url(endpoint) or "")
-            key_why = (
-                f"Envía la clave de {key_name} a {host} por HTTPS, solo para "
-                "leer la lista de modelos: no hay cargos y no se guarda nada."
-            )
+            key_why = tr(
+                "Sends the {name} key to {host} over HTTPS, only to read the "
+                "model list: there are no charges and nothing is stored.",
+                es="Envía la clave de {name} a {host} por HTTPS, solo para "
+                   "leer la lista de modelos: no hay cargos y no se guarda nada.",
+            ).format(name=key_name, host=host)
         entry = full_id(pid, mid) if mid else pid
         result = self._probe_results.get(entry)
         return {
             "can": not blocked,
-            "why": blocked or (
-                "Hace un GET a la lista de modelos: no gasta tokens ni "
-                "escribe nada. La petición es anónima salvo que uses "
-                "«Probar con mi clave»."
+            "why": blocked or tr(
+                "Sends a GET to the model list: spends no tokens and writes "
+                "nothing. The request is anonymous unless you use “Test with "
+                "my key”.",
+                es="Hace un GET a la lista de modelos: no gasta tokens ni "
+                   "escribe nada. La petición es anónima salvo que uses "
+                   "«Probar con mi clave».",
             ),
             "can_key": can_key,
             "key_why": key_why,
@@ -1025,12 +1158,16 @@ class OpenCodeModelManager(QMainWindow):
         """Lanza la prueba en un hilo; nunca bloquea la GUI ni toca disco."""
         pid, mid = self._current_entry
         if not pid or self.workspace.currentIndex() != PAGE_DETAILS:
-            self.statusBar().showMessage(
-                "Abre primero un proveedor o un modelo para probar su conexión."
-            )
+            self.statusBar().showMessage(tr(
+                "Open a provider or a model first to test its connection.",
+                es="Abre primero un proveedor o un modelo para probar su conexión.",
+            ))
             return
         if self.probe_worker is not None and self.probe_worker.isRunning():
-            self.statusBar().showMessage("Ya hay una prueba de conexión en curso.")
+            self.statusBar().showMessage(tr(
+                "A connection test is already running.",
+                es="Ya hay una prueba de conexión en curso.",
+            ))
             return
         info = self.probe_info(pid, mid)
         if not info["can"]:
@@ -1040,7 +1177,9 @@ class OpenCodeModelManager(QMainWindow):
             self.statusBar().showMessage(info["key_why"])
             return
         self.details.set_probe_busy(True)
-        self.statusBar().showMessage(f"Probando {info['endpoint']}…")
+        self.statusBar().showMessage(tr(
+            "Testing {endpoint}…", es="Probando {endpoint}…"
+        ).format(endpoint=info["endpoint"]))
         worker = ProbeWorker(
             info["endpoint"],
             protocol=info["protocol"],
@@ -1057,7 +1196,9 @@ class OpenCodeModelManager(QMainWindow):
 
     def _on_probe_done(self, entry: str, result) -> None:
         self._probe_results[entry] = result
-        self.statusBar().showMessage(f"Prueba de conexión: {result.line()}")
+        self.statusBar().showMessage(tr(
+            "Connection test: {line}", es="Prueba de conexión: {line}"
+        ).format(line=result.line()))
         if entry == self._current_key():
             self._reshow_current()
 
@@ -1103,16 +1244,18 @@ class OpenCodeModelManager(QMainWindow):
         models = pdata.get("models") if isinstance(pdata, dict) else None
         if not isinstance(models, dict) or mid not in models:
             QMessageBox.information(
-                self, "No registrado",
-                "Primero agrega el modelo a OpenCode para poder fijarlo."
+                self, tr("Not registered", es="No registrado"),
+                tr("Add the model to OpenCode first so it can be pinned.",
+                   es="Primero agrega el modelo a OpenCode para poder fijarlo."),
             )
             return
         set_default_model(self.data, full_id(pid, mid), small=small)
         self.refresh()
-        self.statusBar().showMessage(
-            f"{'small_model' if small else 'model'} = {full_id(pid, mid)} "
-            "(aún no guardado)."
-        )
+        self.statusBar().showMessage(tr(
+            "{key} = {model} (not saved yet).",
+            es="{key} = {model} (aún no guardado).",
+        ).format(key="small_model" if small else "model",
+                 model=full_id(pid, mid)))
 
     def details_copy_id(self):
         pid, mid = self._current_entry
@@ -1127,9 +1270,10 @@ class OpenCodeModelManager(QMainWindow):
             entry.api if entry else ""
         )
         if not url:
-            self.statusBar().showMessage(
-                "Este proveedor no tiene endpoint conocido en el catálogo."
-            )
+            self.statusBar().showMessage(tr(
+                "This provider has no known endpoint in the catalog.",
+                es="Este proveedor no tiene endpoint conocido en el catálogo.",
+            ))
             return
         self._copy_to_clipboard(url)
 
@@ -1144,14 +1288,19 @@ class OpenCodeModelManager(QMainWindow):
         app = QApplication.instance()
         clipboard = app.clipboard() if app is not None and hasattr(app, "clipboard") else None
         if clipboard is None:
-            self.statusBar().showMessage(f"Valor: {text}")
+            self.statusBar().showMessage(tr("Value: {text}", es="Valor: {text}")
+                                         .format(text=text))
             return
         try:
             clipboard.setText(text)
         except Exception as exc:
-            self.statusBar().showMessage(f"No se pudo copiar: {exc}")
+            self.statusBar().showMessage(tr(
+                "Could not copy: {error}", es="No se pudo copiar: {error}"
+            ).format(error=exc))
             return
-        self.statusBar().showMessage(f"Copiado al portapapeles: {text}")
+        self.statusBar().showMessage(tr(
+            "Copied to clipboard: {text}", es="Copiado al portapapeles: {text}"
+        ).format(text=text))
 
     # ------------------------------------------------------------------
     # Modo global y LSP
@@ -1167,13 +1316,17 @@ class OpenCodeModelManager(QMainWindow):
                 cmds = "\n".join(f"  • {s}  →  npm install -g {s}" for s in unique)
                 QMessageBox.warning(
                     self,
-                    "Servidor LSP no encontrado",
-                    "LSP se guardará como activado, pero falta el servidor "
-                    "del lenguaje en el PATH. OpenCode seguirá mostrando "
-                    "LSP como desactivado hasta que lo instales:\n\n"
-                    f"{cmds}\n\n"
-                    "Después de instalar, reinicia OpenCode para que lo "
-                    "detecte."
+                    tr("LSP server not found", es="Servidor LSP no encontrado"),
+                    tr("LSP will be saved as enabled, but the language server "
+                       "is missing from PATH. OpenCode will keep showing LSP "
+                       "as disabled until you install it:\n\n{commands}\n\n"
+                       "After installing, restart OpenCode so it detects it.",
+                       es="LSP se guardará como activado, pero falta el servidor "
+                          "del lenguaje en el PATH. OpenCode seguirá mostrando "
+                          "LSP como desactivado hasta que lo instales:\n\n"
+                          "{commands}\n\n"
+                          "Después de instalar, reinicia OpenCode para que lo "
+                          "detecte.").format(commands=cmds)
                 )
             self.data["lsp"] = True
         else:
@@ -1214,9 +1367,11 @@ class OpenCodeModelManager(QMainWindow):
             models = pdata.get("models") if isinstance(pdata, dict) else None
             if not isinstance(models, dict) or mid not in models:
                 QMessageBox.warning(
-                    self, "Sin datos del catálogo",
-                    "Esta entrada no está en el catálogo. Puedes registrarla "
-                    "a mano con «+ Modelo»."
+                    self, tr("No catalog data", es="Sin datos del catálogo"),
+                    tr("This entry is not in the catalog. You can register it "
+                       "by hand with “+ Model”.",
+                       es="Esta entrada no está en el catálogo. Puedes "
+                          "registrarla a mano con «+ Modelo»."),
                 )
                 return
             self.show_model(pid, mid)
@@ -1225,10 +1380,12 @@ class OpenCodeModelManager(QMainWindow):
         self.refresh()
         self.tree.select_entry(pid, mid)
         self.show_model(pid, mid)
-        self.statusBar().showMessage(
-            f"{ref} agregado a opencode.json (aún no guardado). "
-            "La API key se introduce con /connect."
-        )
+        self.statusBar().showMessage(tr(
+            "{ref} added to opencode.json (not saved yet). "
+            "The API key is entered with /connect.",
+            es="{ref} agregado a opencode.json (aún no guardado). "
+               "La API key se introduce con /connect.",
+        ).format(ref=ref))
 
     def add_provider(self):
         dlg = ProviderDialog(self, existing_ids=self.providers().keys())
@@ -1238,26 +1395,31 @@ class OpenCodeModelManager(QMainWindow):
         errors = dlg.errors_for(spec)
         if errors:
             QMessageBox.warning(
-                self, "Validación", "\n".join(errors)
+                self, tr("Validation", es="Validación"), "\n".join(errors)
             )
             return
         pid = add_provider_to_config(self.data, spec)
         self.refresh()
         self.tree.select_entry(pid)
         self.show_provider(pid)
-        self.statusBar().showMessage(
-            f"Proveedor «{pid}» añadido (aún no guardado). "
-            "La API key se introduce con /connect."
-        )
+        self.statusBar().showMessage(tr(
+            "Provider “{id}” added (not saved yet). "
+            "The API key is entered with /connect.",
+            es="Proveedor «{id}» añadido (aún no guardado). "
+               "La API key se introduce con /connect.",
+        ).format(id=pid))
 
     def edit_provider(self, pid: str = ""):
         pid = pid or (self._current_entry[0] if self._current_kind == "provider" else "")
         providers = self.providers()
         if not pid or pid not in providers:
             QMessageBox.information(
-                self, "Sin proveedor registrado",
-                "Selecciona en el árbol un proveedor ya registrado para "
-                "editarlo, o usa «+ Proveedor» para crear uno."
+                self, tr("No registered provider",
+                         es="Sin proveedor registrado"),
+                tr("Select an already registered provider in the tree to edit "
+                   "it, or use “+ Provider” to create one.",
+                   es="Selecciona en el árbol un proveedor ya registrado para "
+                      "editarlo, o usa «+ Proveedor» para crear uno."),
             )
             return
         dlg = ProviderDialog(
@@ -1268,16 +1430,22 @@ class OpenCodeModelManager(QMainWindow):
         add_provider_to_config(self.data, dlg.get_spec())
         self.refresh()
         self.show_provider(pid)
-        self.statusBar().showMessage("Proveedor actualizado (aún no guardado).")
+        self.statusBar().showMessage(tr(
+            "Provider updated (not saved yet).",
+            es="Proveedor actualizado (aún no guardado).",
+        ))
 
     def add_model(self, pid: str = ""):
         pid = pid or self._current_entry[0]
         providers = self.providers()
         if not pid or pid not in providers:
             QMessageBox.information(
-                self, "Sin proveedor registrado",
-                "Selecciona un proveedor registrado en el árbol para "
-                "agregarle un modelo."
+                self, tr("No registered provider",
+                         es="Sin proveedor registrado"),
+                tr("Select a registered provider in the tree to add a model "
+                   "to it.",
+                   es="Selecciona un proveedor registrado en el árbol para "
+                      "agregarle un modelo."),
             )
             return
         pdata = providers[pid]
@@ -1294,7 +1462,9 @@ class OpenCodeModelManager(QMainWindow):
         model_id, name, modelid, limit = dlg.get_data()
         if model_id in models:
             QMessageBox.warning(
-                self, "ID duplicado", f"Ya existe el modelo:\n{model_id}"
+                self, tr("Duplicate ID", es="ID duplicado"),
+                tr("The model already exists:\n{id}",
+                   es="Ya existe el modelo:\n{id}").format(id=model_id),
             )
             return
         model_data = {"name": name}
@@ -1314,9 +1484,10 @@ class OpenCodeModelManager(QMainWindow):
         models = pdata.get("models") if isinstance(pdata, dict) else None
         if not isinstance(models, dict) or mid not in models:
             QMessageBox.information(
-                self, "Sin modelo registrado",
-                "Selecciona un modelo registrado (✓ en el árbol) para "
-                "editarlo."
+                self, tr("No registered model", es="Sin modelo registrado"),
+                tr("Select a registered model (✓ in the tree) to edit it.",
+                   es="Selecciona un modelo registrado (✓ en el árbol) para "
+                      "editarlo."),
             )
             return
         old_data = models[mid]
@@ -1329,8 +1500,9 @@ class OpenCodeModelManager(QMainWindow):
         new_id, name, modelid, limit = dlg.get_data()
         if new_id != mid and new_id in models:
             QMessageBox.warning(
-                self, "ID duplicado",
-                f"Ya existe otro modelo con el ID:\n{new_id}",
+                self, tr("Duplicate ID", es="ID duplicado"),
+                tr("Another model already has the ID:\n{id}",
+                   es="Ya existe otro modelo con el ID:\n{id}").format(id=new_id),
             )
             return
 
@@ -1372,16 +1544,21 @@ class OpenCodeModelManager(QMainWindow):
         """
         elsewhere = self.where_else(key)
         if elsewhere:
-            return (
-                f"«{label}» no está en {self.config_path}, pero sí en "
-                + ", ".join(elsewhere)
-                + ". Esta ventana no lo borra de ahí: ábrelo con «Abrir…» o "
-                  "cambia de modo con «Modo global»."
-            )
-        return (
-            f"«{label}» es solo una fila del catálogo de Models.dev: en "
-            f"{self.config_path} no hay nada que eliminar."
-        )
+            return tr(
+                "“{label}” is not in {path}, but it is in {files}. This "
+                "window will not delete it there: open it with “Open…” or "
+                "switch mode with “Global mode”.",
+                es="«{label}» no está en {path}, pero sí en {files}. Esta "
+                   "ventana no lo borra de ahí: ábrelo con «Abrir…» o cambia "
+                   "de modo con «Modo global».",
+            ).format(label=label, path=self.config_path,
+                     files=", ".join(elsewhere))
+        return tr(
+            "“{label}” is only a row in the Models.dev catalog: there is "
+            "nothing to remove in {path}.",
+            es="«{label}» es solo una fila del catálogo de Models.dev: en "
+               "{path} no hay nada que eliminar.",
+        ).format(label=label, path=self.config_path)
 
     def delete_model(self, pid: str = "", mid: str = ""):
         current_pid, current_mid = self._current_entry
@@ -1400,12 +1577,18 @@ class OpenCodeModelManager(QMainWindow):
 
         reply = QMessageBox.question(
             self,
-            "Confirmar eliminación",
-            f"¿Eliminar este modelo de opencode.json?\n\n"
-            f"Nombre: {name}\n"
-            f"ID: {mid}\n\n"
-            "La credencial de /connect NO será tocada y el modelo seguirá "
-            "disponible en el catálogo.",
+            tr("Confirm removal", es="Confirmar eliminación"),
+            tr("Remove this model from opencode.json?\n\n"
+               "Name: {name}\n"
+               "ID: {id}\n\n"
+               "The /connect credential will NOT be touched and the model "
+               "will remain available in the catalog.",
+               es="¿Eliminar este modelo de opencode.json?\n\n"
+                  "Nombre: {name}\n"
+                  "ID: {id}\n\n"
+                  "La credencial de /connect NO será tocada y el modelo "
+                  "seguirá disponible en el catálogo.").format(
+                      name=name, id=mid),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
@@ -1416,9 +1599,10 @@ class OpenCodeModelManager(QMainWindow):
         self._current_entry = (pid, "")
         self.refresh()
         self.show_provider(pid)
-        self.statusBar().showMessage(
-            f"{pid}/{mid} quitado de opencode.json (aún no guardado)."
-        )
+        self.statusBar().showMessage(tr(
+            "{entry} removed from opencode.json (not saved yet).",
+            es="{entry} quitado de opencode.json (aún no guardado).",
+        ).format(entry=f"{pid}/{mid}"))
 
     def delete_provider(self, pid: str) -> None:
         if not pid:
@@ -1431,9 +1615,17 @@ class OpenCodeModelManager(QMainWindow):
         count = len(pdata.get("models") or {}) if isinstance(pdata, dict) else 0
         reply = QMessageBox.question(
             self,
-            "Confirmar eliminación",
-            f"¿Eliminar el proveedor «{pid}» y sus {count} modelos de "
-            "opencode.json?\n\nLa credencial de /connect NO será tocada.",
+            tr("Confirm removal", es="Confirmar eliminación"),
+            trn(count,
+                "Remove provider “{id}” and its {count} model from "
+                "opencode.json?\n\nThe /connect credential will NOT be touched.",
+                "Remove provider “{id}” and its {count} models from "
+                "opencode.json?\n\nThe /connect credential will NOT be touched.",
+                es_one="¿Eliminar el proveedor «{id}» y su {count} modelo de "
+                       "opencode.json?\n\nLa credencial de /connect NO será tocada.",
+                es_many="¿Eliminar el proveedor «{id}» y sus {count} modelos de "
+                        "opencode.json?\n\nLa credencial de /connect NO será tocada."
+                ).format(id=pid, count=count),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
@@ -1443,11 +1635,14 @@ class OpenCodeModelManager(QMainWindow):
         self._current_entry = ("", "")
         self.refresh()
         self.show_overview()
-        self.statusBar().showMessage(
-            f"Proveedor «{pid}» quitado de opencode.json (aún no guardado). "
-            "Si sigue en el árbol es porque existe en el catálogo: pulsa "
-            "«Guardar» para escribir el archivo."
-        )
+        self.statusBar().showMessage(tr(
+            "Provider “{id}” removed from opencode.json (not saved yet). "
+            "If it is still in the tree it is because it exists in the "
+            "catalog: press “Save” to write the file.",
+            es="Proveedor «{id}» quitado de opencode.json (aún no guardado). "
+               "Si sigue en el árbol es porque existe en el catálogo: pulsa "
+               "«Guardar» para escribir el archivo.",
+        ).format(id=pid))
 
     # ------------------------------------------------------------------
     # Carga, refresco y guardado de la configuración
@@ -1460,9 +1655,11 @@ class OpenCodeModelManager(QMainWindow):
             # Crear una configuración inicial solo después de confirmación.
             reply = QMessageBox.question(
                 self,
-                "Archivo no encontrado",
-                f"No existe:\n{path}\n\n"
-                "¿Quieres crear un opencode.json básico?",
+                tr("File not found", es="Archivo no encontrado"),
+                tr("It does not exist:\n{path}\n\n"
+                   "Do you want to create a basic opencode.json?",
+                   es="No existe:\n{path}\n\n"
+                      "¿Quieres crear un opencode.json básico?").format(path=path),
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.Yes,
             )
@@ -1473,7 +1670,8 @@ class OpenCodeModelManager(QMainWindow):
                 self._refresh_foreign_providers()
                 self.refresh()
             else:
-                self.statusBar().showMessage("Archivo no encontrado.")
+                self.statusBar().showMessage(tr("File not found.",
+                                               es="Archivo no encontrado."))
             return
 
         try:
@@ -1481,19 +1679,25 @@ class OpenCodeModelManager(QMainWindow):
                 self.data = json.load(handle)
         except json.JSONDecodeError as e:
             QMessageBox.critical(
-                self, "JSON inválido", f"No se pudo leer {path}.\n\nError:\n{e}"
+                self, tr("Invalid JSON", es="JSON inválido"),
+                tr("Could not read {path}.\n\nError:\n{error}",
+                   es="No se pudo leer {path}.\n\nError:\n{error}").format(
+                       path=path, error=e),
             )
             return
         except Exception as e:
             QMessageBox.critical(
-                self, "Error", f"No se pudo abrir el archivo:\n{e}"
+                self, tr("Error", es="Error"),
+                tr("Could not open the file:\n{error}",
+                   es="No se pudo abrir el archivo:\n{error}").format(error=e),
             )
             return
 
         if not isinstance(self.data, dict):
             QMessageBox.critical(
-                self, "Configuración inválida",
-                "El contenido de opencode.json debe ser un objeto JSON."
+                self, tr("Invalid configuration", es="Configuración inválida"),
+                tr("The content of opencode.json must be a JSON object.",
+                   es="El contenido de opencode.json debe ser un objeto JSON."),
             )
             return
 
@@ -1518,16 +1722,21 @@ class OpenCodeModelManager(QMainWindow):
         if migrated:
             QMessageBox.information(
                 self,
-                "Migración de configuración",
-                "Se detectó la clave 'providers' y se migró a 'provider' "
-                "(formato estable de OpenCode).\n\n"
-                "Si usas una versión antigua de OpenCode, revisa el archivo "
-                "antes de continuar."
+                tr("Configuration migration", es="Migración de configuración"),
+                tr("The 'providers' key was detected and migrated to "
+                   "'provider' (OpenCode's stable format).\n\n"
+                   "If you use an older version of OpenCode, review the file "
+                   "before continuing.",
+                   es="Se detectó la clave 'providers' y se migró a "
+                      "'provider' (formato estable de OpenCode).\n\n"
+                      "Si usas una versión antigua de OpenCode, revisa el "
+                      "archivo antes de continuar."),
             )
 
         self._mark_saved()
         self.refresh()
-        self.statusBar().showMessage(f"Cargado: {path}")
+        self.statusBar().showMessage(tr("Loaded: {path}", es="Cargado: {path}")
+                                     .format(path=path))
 
     def _snapshot(self) -> str:
         return json.dumps(self.data, sort_keys=True, ensure_ascii=False)
@@ -1549,19 +1758,27 @@ class OpenCodeModelManager(QMainWindow):
         sigue igual (el proveedor viene del catálogo) y cree que no funcionó.
         """
         dirty = self._is_dirty()
-        self.save_btn.setText("Guardar ●" if dirty else "Guardar")
+        self.save_btn.setText(
+            tr("Save ●", es="Guardar ●") if dirty else tr("Save", es="Guardar")
+        )
         self.save_btn.setToolTip(
-            "Hay cambios sin escribir en opencode.json (Ctrl+S)."
+            tr("There are unwritten changes in opencode.json (Ctrl+S).",
+               es="Hay cambios sin escribir en opencode.json (Ctrl+S).")
             if dirty
-            else "Valida, respalda y guarda opencode.json (Ctrl+S)."
+            else tr("Validates, backs up and saves opencode.json (Ctrl+S).",
+                    es="Valida, respalda y guarda opencode.json (Ctrl+S).")
         )
 
     def refresh(self):
         """Vuelve a pintar la ventana a partir de self.data y del catálogo."""
         size, mtime = file_info(self.config_path)
         self.header.set_path(
-            f"{self.config_path} · {size} · {mtime} · "
-            f"{'modo global' if self.use_global else 'modo repositorio'}"
+            tr("{path} · {size} · {time} · {mode}",
+               es="{path} · {size} · {time} · {mode}").format(
+                   path=self.config_path, size=size, time=mtime,
+                   mode=tr("global mode", es="modo global") if self.use_global
+                   else tr("repository mode", es="modo repositorio"),
+               )
         )
         self.update_tree()
         self._update_save_button()
@@ -1579,12 +1796,14 @@ class OpenCodeModelManager(QMainWindow):
         errors = validate_config(self.data)
         if errors:
             QMessageBox.critical(
-                self, "Configuración inválida",
-                "No se guardó. Revisa:\n\n• " + "\n• ".join(errors),
+                self, tr("Invalid configuration", es="Configuración inválida"),
+                tr("Nothing was saved. Check:\n\n• ",
+                   es="No se guardó. Revisa:\n\n• ") + "\n• ".join(errors),
             )
-            self.statusBar().showMessage(
-                "Sin guardar: la configuración no es válida."
-            )
+            self.statusBar().showMessage(tr(
+                "Not saved: the configuration is not valid.",
+                es="Sin guardar: la configuración no es válida.",
+            ))
             return False
 
         try:
@@ -1592,8 +1811,10 @@ class OpenCodeModelManager(QMainWindow):
             json.loads(json_text)
         except Exception as e:
             QMessageBox.critical(
-                self, "JSON inválido",
-                f"No se puede guardar la configuración:\n{e}",
+                self, tr("Invalid JSON", es="JSON inválido"),
+                tr("The configuration cannot be saved:\n{error}",
+                   es="No se puede guardar la configuración:\n{error}").format(
+                       error=e),
             )
             return False
 
@@ -1603,19 +1824,27 @@ class OpenCodeModelManager(QMainWindow):
         if previous is not None and current is not None and previous != current:
             reply = QMessageBox.question(
                 self,
-                "El archivo cambió fuera de esta ventana",
-                f"{path}\n\nfue modificado después de cargarlo (por "
-                "OpenCode, un editor o tú mismo).\n\n"
-                "¿Sobrescribirlo con la versión de esta ventana?\n"
-                "«No» deja el archivo externo intacto y no guarda nada.",
+                tr("The file changed outside this window",
+                   es="El archivo cambió fuera de esta ventana"),
+                tr("{path}\n\nwas modified after it was loaded (by OpenCode, "
+                   "an editor or yourself).\n\n"
+                   "Overwrite it with this window's version?\n"
+                   "“No” leaves the external file untouched and saves nothing.",
+                   es="{path}\n\nfue modificado después de cargarlo (por "
+                      "OpenCode, un editor o tú mismo).\n\n"
+                      "¿Sobrescribirlo con la versión de esta ventana?\n"
+                      "«No» deja el archivo externo intacto y no guarda nada."
+                   ).format(path=path),
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No,
             )
             if reply != QMessageBox.StandardButton.Yes:
-                self.statusBar().showMessage(
-                    "Sin guardar: se conservó el archivo externo. "
-                    "Recarga con Ctrl+R para merges manuales."
-                )
+                self.statusBar().showMessage(tr(
+                    "Not saved: the external file was kept. Reload with "
+                    "Ctrl+R for manual merges.",
+                    es="Sin guardar: se conservó el archivo externo. "
+                       "Recarga con Ctrl+R para merges manuales.",
+                ))
                 return False
 
         if path.exists():
@@ -1641,28 +1870,37 @@ class OpenCodeModelManager(QMainWindow):
                 os.fsync(handle.fileno())
             os.replace(tmp, path)
         except Exception as e:
-            QMessageBox.critical(self, "Error al guardar", f"No se pudo guardar:\n{e}")
+            QMessageBox.critical(
+                self, tr("Error saving", es="Error al guardar"),
+                tr("Could not save:\n{error}", es="No se pudo guardar:\n{error}")
+                .format(error=e),
+            )
             return False
 
         self._file_fingerprint = file_fingerprint(path)
         self._mark_saved()
         self.refresh()
         if quiet:
-            self.statusBar().showMessage(f"Guardado: {path}")
+            self.statusBar().showMessage(tr("Saved: {path}", es="Guardado: {path}")
+                                         .format(path=path))
             return True
 
         QMessageBox.information(
             self,
-            "Guardado",
-            "opencode.json se guardó correctamente.\n\n"
-            "La API key almacenada por /connect no fue modificada.",
+            tr("Saved", es="Guardado"),
+            tr("opencode.json was saved successfully.\n\n"
+               "The API key stored by /connect was not modified.",
+               es="opencode.json se guardó correctamente.\n\n"
+                  "La API key almacenada por /connect no fue modificada."),
         )
         return True
 
     def create_backup(self):
         if not self.config_path.exists():
             QMessageBox.warning(
-                self, "Sin archivo", "No existe un archivo para respaldar."
+                self, tr("No file", es="Sin archivo"),
+                tr("There is no file to back up.",
+                   es="No existe un archivo para respaldar."),
             )
             return
 
@@ -1674,11 +1912,17 @@ class OpenCodeModelManager(QMainWindow):
         try:
             shutil.copy2(self.config_path, backup)
         except Exception as e:
-            QMessageBox.critical(self, "Error", f"No se pudo crear la copia:\n{e}")
+            QMessageBox.critical(
+                self, tr("Error", es="Error"),
+                tr("Could not create the copy:\n{error}",
+                   es="No se pudo crear la copia:\n{error}").format(error=e),
+            )
             return
 
         QMessageBox.information(
-            self, "Copia creada", f"Backup guardado en:\n\n{backup}"
+            self, tr("Backup created", es="Copia creada"),
+            tr("Backup saved to:\n\n{path}", es="Backup guardado en:\n\n{path}")
+            .format(path=backup),
         )
 
     def show_preview(self):
@@ -1689,9 +1933,11 @@ class OpenCodeModelManager(QMainWindow):
     def open_config(self):
         path, _ = QFileDialog.getOpenFileName(
             self,
-            "Abrir configuración de OpenCode",
+            tr("Open OpenCode configuration",
+               es="Abrir configuración de OpenCode"),
             str(self.config_path.parent),
-            "OpenCode JSON (opencode.json);;JSON (*.json);;Todos (*)",
+            tr("OpenCode JSON (opencode.json);;JSON (*.json);;All files (*)",
+               es="OpenCode JSON (opencode.json);;JSON (*.json);;Todos (*)"),
         )
         if not path:
             return
@@ -1703,9 +1949,11 @@ class OpenCodeModelManager(QMainWindow):
         if self._is_dirty():
             reply = QMessageBox.question(
                 self,
-                "Cambios sin guardar",
-                "opencode.json todavía no contiene los cambios de esta "
-                "ventana.\n\n¿Salir sin guardar?",
+                tr("Unsaved changes", es="Cambios sin guardar"),
+                tr("opencode.json does not contain this window's changes yet."
+                   "\n\nExit without saving?",
+                   es="opencode.json todavía no contiene los cambios de esta "
+                      "ventana.\n\n¿Salir sin guardar?"),
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No,
             )

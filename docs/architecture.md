@@ -16,6 +16,7 @@ the usual entry point and only boots the GUI.
 | `omm/workers.py` | `CatalogLoadWorker` and `ProbeWorker` (`QThread`): they never mutate GUI state, they deliver it by signal |
 | `omm/probe.py` | Connection test with stdlib only: URL per protocol, metadata and cleartext-key rejection, no redirects, DNS/TLS/timeout/HTTP classification, key redaction and an injectable `opener` for the tests |
 | `omm/theme.py` | Light/dark palettes (with a `QPalette` role map) and QSS; no Qt dependencies |
+| `omm/i18n.py` | English-first interface strings with the Spanish text inline (`tr("English", es="Español")`), plurals (`trn`), locale number separators and startup precedence `OMM_LANG` → saved choice → English |
 
 Design rules the code keeps:
 
@@ -25,3 +26,7 @@ Design rules the code keeps:
 - Network work runs in `QThread`; results travel in signals.
 - The connection probe never mutates the window; it returns a result the
   window decides how to show.
+- Every visible string is written next to its Spanish translation with
+  `tr(..., es=...)`; there is no separate catalog that can drift. Panel
+  `retranslate()` methods re-apply static texts on a live language change,
+  and `refresh()` regenerates the dynamic views.

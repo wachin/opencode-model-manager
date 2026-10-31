@@ -11,6 +11,7 @@ from __future__ import annotations
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from omm.catalog import CatalogStore
+from omm.i18n import tr
 from omm.probe import (
     PROBE_TIMEOUT_SECONDS, KIND_ERROR, KIND_NO_ENV, ProbeResult,
     first_present_env, probe_endpoint,
@@ -88,14 +89,20 @@ class ProbeWorker(QThread):
         if self.with_key:
             env_name, api_key = first_present_env(self.env_names)
             if not api_key:
-                declared = ", ".join(self.env_names) or "La variable del proveedor"
+                declared = ", ".join(self.env_names) or tr(
+                    "The provider variable", es="La variable del proveedor"
+                )
+                detail = tr(
+                    "{declared} is not defined in this window's environment; "
+                    "there is nothing to send.",
+                    es="{declared} no está definida en el entorno de esta "
+                       "ventana; no hay nada que enviar.",
+                ).format(declared=declared)
                 self.done.emit(ProbeResult(
                     kind=KIND_NO_ENV,
-                    summary="Sin clave en el entorno",
-                    detail=(
-                        f"{declared} no está definida en el entorno de esta "
-                        "ventana; no hay nada que enviar."
-                    ),
+                    summary=tr("No key in the environment",
+                               es="Sin clave en el entorno"),
+                    detail=detail,
                     url=self.base_url,
                 ))
                 return
@@ -112,7 +119,8 @@ class ProbeWorker(QThread):
         except Exception as exc:  # ninguna excepción debe dejar el botón «Probando…»
             result = ProbeResult(
                 kind=KIND_ERROR,
-                summary="La prueba no ha podido completarse",
+                summary=tr("The test could not be completed",
+                           es="La prueba no ha podido completarse"),
                 detail=str(exc) or exc.__class__.__name__,
                 url=self.base_url,
             )

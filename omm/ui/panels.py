@@ -19,6 +19,7 @@ from PyQt6.QtWidgets import (
     QVBoxLayout, QWidget,
 )
 
+from omm.i18n import LANGUAGES, format_int, get_language, tr
 from omm.search import (
     PROTOCOL_ANY, PROTOCOL_OTHER, SCOPE_ALL, SCOPE_CONFIGURED,
     SCOPE_UNCONFIGURED, SORT_CONTEXT, SORT_NAME, SORT_PRICE, SORT_PROVIDER,
@@ -124,14 +125,16 @@ class ProviderTreePanel(QTreeWidget):
     def _provider_tip(self, row: dict) -> str:
         tip = (
             f"ID: {row['id']}\n"
-            f"Protocolo: {row['protocol']}\n"
+            f"{tr('Protocol', es='Protocolo')}: {row['protocol']}\n"
             f"SDK: {row['npm'] or '—'}\n"
-            f"Endpoint: {row['base_url'] or '—'}\n"
-            f"Modelos: {row['count']}"
+            f"{tr('Endpoint', es='Endpoint')}: {row['base_url'] or '—'}\n"
+            f"{tr('Models', es='Modelos')}: {row['count']}"
         )
         note = self._notes.get(row["id"], "")
         if row["configured"]:
-            tip += f"\nRegistrado en {self._config_path or 'opencode.json'}"
+            tip += "\n" + tr(
+                "Registered in {path}", es="Registrado en {path}"
+            ).format(path=self._config_path or "opencode.json")
         if note:
             tip += "\n" + note
         return tip
@@ -162,7 +165,9 @@ class ProviderTreePanel(QTreeWidget):
             tip = f"ID: {mrow['id']}"
             note = self._notes.get(f"{pid}/{mrow['id']}", "")
             if mrow["configured"]:
-                tip += f"\nRegistrado en {self._config_path or 'opencode.json'}"
+                tip += "\n" + tr(
+                    "Registered in {path}", es="Registrado en {path}"
+                ).format(path=self._config_path or "opencode.json")
             if note:
                 tip += "\n" + note
             child.setToolTip(0, tip)
@@ -231,7 +236,9 @@ class SearchResultsPanel(QListWidget):
         # Aviso de lista vacía: hijo del viewport, porque QListView no
         # expone placeholderText en PyQt6.
         self._empty = QLabel(
-            "Sin coincidencias con esta búsqueda y filtros.", self.viewport()
+            tr("No matches for this search and filters.",
+               es="Sin coincidencias con esta búsqueda y filtros."),
+            self.viewport(),
         )
         self._empty.setObjectName("emptyState")
         self._empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -265,7 +272,7 @@ class SearchResultsPanel(QListWidget):
     def _label(model) -> str:
         bits = [f"{model.name}", f"· {model.provider_name}"]
         if model.context:
-            bits.append(f"· ctx {model.context:,}".replace(",", "."))
+            bits.append(f"· ctx {format_int(model.context)}")
         if model.reasoning:
             bits.append("· R")
         if model.tool_call:
@@ -311,30 +318,15 @@ class FilterPanel(QWidget):
 
         row_prov = QHBoxLayout()
         row_prov.setSpacing(8)
-        row_prov.addWidget(QLabel("Proveedores:"))
+        self.providers_label = QLabel()
+        row_prov.addWidget(self.providers_label)
         self.scope_combo = QComboBox()
-        self.scope_combo.addItem("Todos", SCOPE_ALL)
-        self.scope_combo.addItem("Registrados en OpenCode", SCOPE_CONFIGURED)
-        self.scope_combo.addItem("Sin registrar", SCOPE_UNCONFIGURED)
-        self.scope_combo.setToolTip("Mostrar solo proveedores registrados (o no).")
         self.scope_combo.currentIndexChanged.connect(self.filters_changed)
         row_prov.addWidget(self.scope_combo)
         self.protocol_combo = QComboBox()
-        self.protocol_combo.addItem("Cualquier protocolo", PROTOCOL_ANY)
-        self.protocol_combo.addItem("OpenAI-compatible", "openai-compatible")
-        self.protocol_combo.addItem("OpenAI", "openai")
-        self.protocol_combo.addItem("Anthropic", "anthropic")
-        self.protocol_combo.addItem("Google", "google")
-        self.protocol_combo.addItem("Otros", PROTOCOL_OTHER)
-        self.protocol_combo.setToolTip(
-            "«Otros» incluye los protocolos no listados (Bedrock, Azure…)."
-        )
         self.protocol_combo.currentIndexChanged.connect(self.filters_changed)
         row_prov.addWidget(self.protocol_combo)
-        self.local_check = QCheckBox("Locales")
-        self.local_check.setToolTip(
-            "Endpoints de máquina local (Ollama, LM Studio, llama.cpp…)."
-        )
+        self.local_check = QCheckBox()
         self.local_check.toggled.connect(self.filters_changed)
         row_prov.addWidget(self.local_check)
         row_prov.addStretch()
@@ -342,30 +334,96 @@ class FilterPanel(QWidget):
 
         row_model = QHBoxLayout()
         row_model.setSpacing(6)
-        row_model.addWidget(QLabel("Modelos:"))
+        self.models_label = QLabel()
+        row_model.addWidget(self.models_label)
         self._chips: list[QToolButton] = []
-        chip_defs = (
-            ("free", "Gratis"), ("paid", "De pago"),
-            ("free_tier", "Nivel gratis"), ("coding", "Código"),
-            ("reasoning", "Razonamiento"), ("vision", "Visión"),
-            ("tools", "Tool calling"), ("multimodal", "Multimodal"),
-            ("large_context", "Contexto ≥ 200k"),
-        )
-        for attr, label in chip_defs:
+        for attr, _en, _es in self.CHIP_DEFS:
             chip = QToolButton()
-            chip.setText(label)
             chip.setCheckable(True)
-            chip.setToolTip(f"Filtro «{label}» combinable con los demás.")
             chip.toggled.connect(self.filters_changed)
             setattr(self, f"chip_{attr}", chip)
             self._chips.append(chip)
             row_model.addWidget(chip)
         row_model.addStretch()
-        self.clear_btn = QPushButton("Limpiar filtros")
+        self.clear_btn = QPushButton()
         self.clear_btn.setObjectName("ghost")
         self.clear_btn.clicked.connect(self._on_clear)
         row_model.addWidget(self.clear_btn)
         root.addLayout(row_model)
+        self.retranslate()
+
+    # Definiciones con su traducción al lado: retranslate() las reaplica al
+    # cambiar de idioma sin reconstruir la ventana ni perder los filtros.
+    CHIP_DEFS = (
+        ("free", "Free", "Gratis"),
+        ("paid", "Paid", "De pago"),
+        ("free_tier", "Free tier", "Nivel gratis"),
+        ("coding", "Coding", "Código"),
+        ("reasoning", "Reasoning", "Razonamiento"),
+        ("vision", "Vision", "Visión"),
+        ("tools", "Tool calling", "Tool calling"),
+        ("multimodal", "Multimodal", "Multimodal"),
+        ("large_context", "Context ≥ 200k", "Contexto ≥ 200k"),
+    )
+    SCOPE_ITEMS = (
+        (SCOPE_ALL, "All", "Todos"),
+        (SCOPE_CONFIGURED, "Registered in OpenCode",
+         "Registrados en OpenCode"),
+        (SCOPE_UNCONFIGURED, "Unregistered", "Sin registrar"),
+    )
+    PROTOCOL_ITEMS = (
+        (PROTOCOL_ANY, "Any protocol", "Cualquier protocolo"),
+        ("openai-compatible", "OpenAI-compatible", "OpenAI-compatible"),
+        ("openai", "OpenAI", "OpenAI"),
+        ("anthropic", "Anthropic", "Anthropic"),
+        ("google", "Google", "Google"),
+        (PROTOCOL_OTHER, "Other", "Otros"),
+    )
+
+    def retranslate(self) -> None:
+        self.providers_label.setText(tr("Providers:", es="Proveedores:"))
+        self.models_label.setText(tr("Models:", es="Modelos:"))
+        self.local_check.setText(tr("Local", es="Locales"))
+        self.local_check.setToolTip(tr(
+            "Endpoints on this machine (Ollama, LM Studio, llama.cpp…).",
+            es="Endpoints de máquina local (Ollama, LM Studio, llama.cpp…).",
+        ))
+        self.scope_combo.blockSignals(True)
+        self.protocol_combo.blockSignals(True)
+        self._fill(self.scope_combo, self.SCOPE_ITEMS)
+        self._fill(self.protocol_combo, self.PROTOCOL_ITEMS)
+        self.scope_combo.blockSignals(False)
+        self.protocol_combo.blockSignals(False)
+        self.scope_combo.setToolTip(tr(
+            "Show only registered providers (or only unregistered ones).",
+            es="Mostrar solo proveedores registrados (o no).",
+        ))
+        self.protocol_combo.setToolTip(tr(
+            "“Other” includes protocols not listed here (Bedrock, Azure…).",
+            es="«Otros» incluye los protocolos no listados (Bedrock, Azure…).",
+        ))
+        for chip, (attr, english, spanish) in zip(self._chips, self.CHIP_DEFS):
+            label = tr(english, es=spanish)
+            chip.setText(label)
+            chip.setToolTip(tr(
+                "Filter “{label}”, combinable with the rest.",
+                es="Filtro «{label}» combinable con los demás.",
+            ).format(label=label))
+        self.clear_btn.setText(tr("Clear filters", es="Limpiar filtros"))
+
+    @staticmethod
+    def _fill(combo: QComboBox, items) -> None:
+        """Reescribe los textos conservando datos e índice actual."""
+        current = combo.currentData()
+        if combo.count() != len(items):
+            combo.clear()
+            for data, _en, _es in items:
+                combo.addItem("", data)
+        for index, (_data, english, spanish) in enumerate(items):
+            combo.setItemText(index, tr(english, es=spanish))
+        index = combo.findData(current)
+        if index >= 0:
+            combo.setCurrentIndex(index)
 
     def _on_clear(self) -> None:
         self.reset_controls()
@@ -451,21 +509,25 @@ class DetailsPanel(QWidget):
 
         actions = QHBoxLayout()
         actions.setSpacing(8)
-        self.add_btn = QPushButton("Agregar a OpenCode")
+        self.add_btn = QPushButton(tr("Add to OpenCode", es="Agregar a OpenCode"))
         self.add_btn.setObjectName("primary")
         self.add_btn.clicked.connect(self.add_requested)
-        self.edit_btn = QPushButton("Editar configuración")
+        self.edit_btn = QPushButton(tr("Edit configuration", es="Editar configuración"))
         self.edit_btn.clicked.connect(self.edit_requested)
-        self.default_btn = QPushButton("Fijar como predeterminado")
+        self.default_btn = QPushButton(tr(
+            "Set as default", es="Fijar como predeterminado"))
         self.default_btn.clicked.connect(lambda: self.set_default_requested.emit(False))
-        self.small_btn = QPushButton("Fijar como modelo ligero")
-        self.small_btn.setToolTip("Escribe «small_model» en opencode.json.")
+        self.small_btn = QPushButton(tr(
+            "Set as small model", es="Fijar como modelo ligero"))
+        self.small_btn.setToolTip(tr(
+            "Writes “small_model” in opencode.json.",
+            es="Escribe «small_model» en opencode.json."))
         self.small_btn.clicked.connect(lambda: self.set_default_requested.emit(True))
-        self.copy_id_btn = QPushButton("Copiar ID")
+        self.copy_id_btn = QPushButton(tr("Copy ID", es="Copiar ID"))
         self.copy_id_btn.clicked.connect(self.copy_id_requested)
-        self.copy_url_btn = QPushButton("Copiar endpoint")
+        self.copy_url_btn = QPushButton(tr("Copy endpoint", es="Copiar endpoint"))
         self.copy_url_btn.clicked.connect(self.copy_endpoint_requested)
-        self.remove_btn = QPushButton("Quitar de OpenCode")
+        self.remove_btn = QPushButton(tr("Remove from OpenCode", es="Quitar de OpenCode"))
         self.remove_btn.setObjectName("danger")
         self.remove_btn.clicked.connect(self.remove_requested)
         for b in (
@@ -480,9 +542,10 @@ class DetailsPanel(QWidget):
         # de arriba ya ocupa todo el ancho en pantallas estrechas.
         probe_row = QHBoxLayout()
         probe_row.setSpacing(8)
-        self.probe_btn = QPushButton("Probar conexión")
+        self.probe_btn = QPushButton(tr("Test connection", es="Probar conexión"))
         self.probe_btn.clicked.connect(lambda: self.probe_requested.emit(False))
-        self.probe_key_btn = QPushButton("Probar con mi clave")
+        self.probe_key_btn = QPushButton(tr(
+            "Test with my key", es="Probar con mi clave"))
         self.probe_key_btn.clicked.connect(lambda: self.probe_requested.emit(True))
         probe_row.addWidget(self.probe_btn)
         probe_row.addWidget(self.probe_key_btn)
@@ -495,26 +558,29 @@ class DetailsPanel(QWidget):
     # Etiquetas según el tipo de entrada: los siete botones existen siempre,
     # pero cambian de sentido (modelo registrado vs proveedor) para que
     # ninguno quede inactivo sin explicación.
-    _MODE_LABELS = {
-        "model": {
-            "add": "Agregar a OpenCode",
-            "edit": "Editar modelo",
-            "default": "Fijar como predeterminado",
-            "small": "Fijar como modelo ligero",
-            "copy_id": "Copiar ID",
-            "copy_url": "Copiar endpoint",
-            "remove": "Quitar de OpenCode",
-        },
-        "provider": {
-            "add": "Agregar modelo",
-            "edit": "Editar proveedor",
-            "default": "Fijar predeterminado",
-            "small": "Fijar ligero",
-            "copy_id": "Copiar ID del proveedor",
-            "copy_url": "Copiar endpoint",
-            "remove": "Quitar proveedor",
-        },
-    }
+    @staticmethod
+    def _mode_labels(kind: str) -> dict[str, str]:
+        labels = {
+            "model": {
+                "add": tr("Add to OpenCode", es="Agregar a OpenCode"),
+                "edit": tr("Edit model", es="Editar modelo"),
+                "default": tr("Set as default", es="Fijar como predeterminado"),
+                "small": tr("Set as small model", es="Fijar como modelo ligero"),
+                "copy_id": tr("Copy ID", es="Copiar ID"),
+                "copy_url": tr("Copy endpoint", es="Copiar endpoint"),
+                "remove": tr("Remove from OpenCode", es="Quitar de OpenCode"),
+            },
+            "provider": {
+                "add": tr("Add model", es="Agregar modelo"),
+                "edit": tr("Edit provider", es="Editar proveedor"),
+                "default": tr("Set default", es="Fijar predeterminado"),
+                "small": tr("Set small", es="Fijar ligero"),
+                "copy_id": tr("Copy provider ID", es="Copiar ID del proveedor"),
+                "copy_url": tr("Copy endpoint", es="Copiar endpoint"),
+                "remove": tr("Remove provider", es="Quitar proveedor"),
+            },
+        }
+        return labels.get(kind, labels["model"])
 
     @staticmethod
     def _clear_rows(layout) -> None:
@@ -539,7 +605,8 @@ class DetailsPanel(QWidget):
     def show_rows(self, title: str, subtitle: str, badge: str, rows,
                   registered: bool, kind: str = "model",
                   action_note: str = "", probe: dict | None = None) -> None:
-        labels = self._MODE_LABELS.get(kind, self._MODE_LABELS["model"])
+        self._kind = kind
+        labels = self._mode_labels(kind)
         self.title.setText(title)
         self.subtitle.setText(subtitle)
         self.badge.setText(badge)
@@ -569,29 +636,38 @@ class DetailsPanel(QWidget):
 
         if kind == "provider":
             self.add_btn.setEnabled(True)
-            self.add_btn.setToolTip(
-                "Registrar un modelo a mano en este proveedor."
-            )
+            self.add_btn.setToolTip(tr(
+                "Register a model by hand for this provider.",
+                es="Registrar un modelo a mano en este proveedor.",
+            ))
             self.default_btn.setEnabled(False)
-            self.default_btn.setToolTip(
-                "Abre un modelo (doble clic en los resultados) para fijarlo."
-            )
+            self.default_btn.setToolTip(tr(
+                "Open a model (double-click in the results) to set it.",
+                es="Abre un modelo (doble clic en los resultados) para fijarlo.",
+            ))
             self.small_btn.setEnabled(False)
             self.small_btn.setToolTip(self.default_btn.toolTip())
             self.edit_btn.setEnabled(registered)
             self.remove_btn.setEnabled(registered)
             # Un botón gris sin explicación parece un fallo: los proveedores
             # del árbol existen aunque no estén en opencode.json.
-            fallback = (
-                "Editar y quitar actúan sobre lo que hay en opencode.json."
-                if registered
-                else "Este proveedor no está en el opencode.json que estás "
-                     "editando (mira la ruta de la cabecera): no hay nada que "
-                     "editar ni quitar. En el árbol sigue visible porque "
-                     "viene del catálogo de Models.dev. Si lo tienes "
-                     "registrado en otro archivo —por ejemplo el "
-                     "opencode.json de un proyecto— ábrelo con «Abrir…» o "
-                     "cambia de modo con «Modo global»."
+            fallback = tr(
+                "Edit and remove act on what is in opencode.json.",
+                es="Editar y quitar actúan sobre lo que hay en opencode.json.",
+            ) if registered else tr(
+                "This provider is not in the opencode.json you are editing "
+                "(look at the path in the header): there is nothing to edit "
+                "or remove. It is still visible in the tree because it comes "
+                "from the Models.dev catalog. If it is registered in another "
+                "file —for example a project's opencode.json— open it with "
+                "“Open…” or switch mode with “Global mode”.",
+                es="Este proveedor no está en el opencode.json que estás "
+                   "editando (mira la ruta de la cabecera): no hay nada que "
+                   "editar ni quitar. En el árbol sigue visible porque "
+                   "viene del catálogo de Models.dev. Si lo tienes "
+                   "registrado en otro archivo —por ejemplo el "
+                   "opencode.json de un proyecto— ábrelo con «Abrir…» o "
+                   "cambia de modo con «Modo global».",
             )
             why = action_note or fallback
             self.edit_btn.setToolTip(why)
@@ -599,40 +675,55 @@ class DetailsPanel(QWidget):
         else:
             self.add_btn.setEnabled(not registered)
             self.add_btn.setToolTip(
-                "Registra este modelo en opencode.json (no toca credenciales)."
-                if not registered else "Este modelo ya está registrado."
+                tr("Registers this model in opencode.json (touches no credentials).",
+                   es="Registra este modelo en opencode.json (no toca credenciales).")
+                if not registered else tr(
+                    "This model is already registered.",
+                    es="Este modelo ya está registrado.")
             )
             self.default_btn.setEnabled(registered)
             self.default_btn.setToolTip(
-                "Escribe «model» en opencode.json."
-                if registered else "Primero hay que registrarlo."
+                tr("Writes “model” in opencode.json.",
+                   es="Escribe «model» en opencode.json.")
+                if registered else tr("Register it first.",
+                                      es="Primero hay que registrarlo.")
             )
             self.small_btn.setEnabled(registered)
             self.small_btn.setToolTip(
-                "Escribe «small_model» en opencode.json (tareas rápidas)."
-                if registered else "Primero hay que registrarlo."
+                tr("Writes “small_model” in opencode.json (quick tasks).",
+                   es="Escribe «small_model» en opencode.json (tareas rápidas).")
+                if registered else tr("Register it first.",
+                                      es="Primero hay que registrarlo.")
             )
             self.edit_btn.setEnabled(registered)
             self.remove_btn.setEnabled(registered)
             why = action_note or (
-                "Editar y quitar actúan sobre lo que hay en opencode.json."
+                tr("Edit and remove act on what is in opencode.json.",
+                   es="Editar y quitar actúan sobre lo que hay en opencode.json.")
                 if registered
-                else "Este modelo no está en el opencode.json que estás "
-                     "editando: no hay nada que editar ni quitar. Con "
-                     "«Agregar a OpenCode» queda registrado."
+                else tr(
+                    "This model is not in the opencode.json you are editing: "
+                    "there is nothing to edit or remove. “Add to OpenCode” "
+                    "registers it.",
+                    es="Este modelo no está en el opencode.json que estás "
+                       "editando: no hay nada que editar ni quitar. Con "
+                       "«Agregar a OpenCode» queda registrado.",
+                )
             )
             self.edit_btn.setToolTip(why)
             self.remove_btn.setToolTip(why)
 
         has_endpoint = any(
-            label == "API / Base URL" and value not in ("", "Desconocida")
+            label == tr("API / Base URL", es="API / Base URL")
+            and value not in ("", tr("Unknown", es="Desconocida"))
             for label, value in rows
         )
         self.copy_url_btn.setEnabled(has_endpoint)
         if not has_endpoint:
-            self.copy_url_btn.setToolTip(
-                "El catálogo no conoce el endpoint de este proveedor."
-            )
+            self.copy_url_btn.setToolTip(tr(
+                "The catalog does not know this provider's endpoint.",
+                es="El catálogo no conoce el endpoint de este proveedor.",
+            ))
         self.set_probe(probe)
 
     # -- prueba de conexión ------------------------------------------------
@@ -640,10 +731,15 @@ class DetailsPanel(QWidget):
     # El panel no decide nada: main_window calcula si se puede probar, por
     # qué no, y con qué clave. Así el aviso del botón y la propia prueba
     # salen de la misma frase y nunca se contradicen.
-    _PROBE_TIP = (
-        "Hace un GET a la lista de modelos del endpoint: no gasta tokens, "
-        "no envía credenciales y no escribe en tu configuración."
-    )
+    @staticmethod
+    def _probe_tip() -> str:
+        return tr(
+            "Sends a GET to the endpoint's model list: spends no tokens, "
+            "sends no credentials and writes nothing to your configuration.",
+            es="Hace un GET a la lista de modelos del endpoint: no gasta "
+               "tokens, no envía credenciales y no escribe en tu "
+               "configuración.",
+        )
 
     def set_probe(self, info: dict | None = None) -> None:
         """Nueva ficha: el estado de la prueba y el resultado, si lo hay."""
@@ -662,14 +758,21 @@ class DetailsPanel(QWidget):
         can_key = bool(info.get("can_key"))
         busy = self._probe_busy
         why = str(info.get("why") or "")
-        self.probe_btn.setText("Probando…" if busy else "Probar conexión")
+        self.probe_btn.setText(
+            tr("Testing…", es="Probando…") if busy
+            else tr("Test connection", es="Probar conexión")
+        )
         self.probe_btn.setEnabled(can and not busy)
-        self.probe_btn.setToolTip(why or self._PROBE_TIP)
+        self.probe_btn.setToolTip(why or self._probe_tip())
         self.probe_key_btn.setEnabled(can and can_key and not busy)
         self.probe_key_btn.setVisible(can and can_key)
         self.probe_key_btn.setToolTip(
-            str(info.get("key_why") or "Envía la clave del entorno solo a "
-                "este endpoint, para comprobar que te autoriza.")
+            str(info.get("key_why") or tr(
+                "Sends the environment key only to this endpoint, to check "
+                "that it authorizes you.",
+                es="Envía la clave del entorno solo a este endpoint, para "
+                   "comprobar que te autoriza.",
+            ))
         )
 
 
@@ -680,7 +783,7 @@ class OverviewPanel(QWidget):
         super().__init__(parent)
         root = QVBoxLayout(self)
         root.setContentsMargins(4, 4, 4, 4)
-        self.title = QLabel("Resumen")
+        self.title = QLabel(tr("Overview", es="Resumen"))
         f = QFont()
         f.setPointSize(14)
         f.setBold(True)
@@ -702,6 +805,14 @@ class HeaderBar(QWidget):
     search_changed = pyqtSignal(str)
     filters_toggled = pyqtSignal(bool)
     sort_changed = pyqtSignal(str, bool)
+    language_changed = pyqtSignal(str)
+
+    SORT_ITEMS = (
+        ("A → Z", SORT_NAME, "A → Z"),
+        ("Provider", SORT_PROVIDER, "Proveedor"),
+        ("Context", SORT_CONTEXT, "Contexto"),
+        ("Price", SORT_PRICE, "Precio"),
+    )
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -733,9 +844,6 @@ class HeaderBar(QWidget):
         self.row2 = row2
         self.search_edit = QLineEdit()
         self.search_edit.setObjectName("searchBox")
-        self.search_edit.setPlaceholderText(
-            "Buscar proveedores, modelos, endpoints, descripciones…  (Ctrl+F)"
-        )
         self.search_edit.setClearButtonEnabled(True)
         self._debounce = QTimer(self)
         self._debounce.setSingleShot(True)
@@ -749,32 +857,62 @@ class HeaderBar(QWidget):
         )
         row2.addWidget(self.search_edit, 1)
         self.filters_btn = QToolButton()
-        self.filters_btn.setText("Filtros")
         self.filters_btn.setCheckable(True)
-        self.filters_btn.setToolTip("Mostrar u ocultar el panel de filtros.")
         self.filters_btn.toggled.connect(self.filters_toggled)
         row2.addWidget(self.filters_btn)
         self.sort_combo = QComboBox()
-        for label, data in (
-            ("A → Z", SORT_NAME),
-            ("Proveedor", SORT_PROVIDER),
-            ("Contexto", SORT_CONTEXT),
-            ("Precio", SORT_PRICE),
-        ):
-            self.sort_combo.addItem(label, data)
-        self.sort_combo.setToolTip("Criterio de orden de los resultados.")
+        for _english, data, _spanish in self.SORT_ITEMS:
+            self.sort_combo.addItem("", data)
         self.sort_combo.currentIndexChanged.connect(self._emit_sort)
         row2.addWidget(self.sort_combo)
         self.dir_btn = QToolButton()
         self.dir_btn.setText("↑↓")
         self.dir_btn.setCheckable(True)
-        self.dir_btn.setToolTip("Invertir el orden.")
         self.dir_btn.toggled.connect(lambda _on: self._emit_sort())
         row2.addWidget(self.dir_btn)
         self.count_label = QLabel("")
         self.count_label.setObjectName("mutedLabel")
         row2.addWidget(self.count_label)
+        self.language_combo = QComboBox()
+        for code, name in LANGUAGES.items():
+            self.language_combo.addItem(name, code)
+        self.language_combo.currentIndexChanged.connect(self._emit_language)
+        row2.addWidget(self.language_combo)
         root.addLayout(row2)
+        self.retranslate()
+
+    def retranslate(self) -> None:
+        """Reaplica los textos fijos sin perder búsqueda, orden ni idioma."""
+        self.search_edit.setPlaceholderText(tr(
+            "Search providers, models, endpoints, descriptions…  (Ctrl+F)",
+            es="Buscar proveedores, modelos, endpoints, descripciones…  (Ctrl+F)",
+        ))
+        self.filters_btn.setText(tr("Filters", es="Filtros"))
+        self.filters_btn.setToolTip(tr(
+            "Show or hide the filter panel.",
+            es="Mostrar u ocultar el panel de filtros.",
+        ))
+        self.sort_combo.blockSignals(True)
+        for index, (english, _data, spanish) in enumerate(self.SORT_ITEMS):
+            self.sort_combo.setItemText(index, tr(english, es=spanish))
+        self.sort_combo.blockSignals(False)
+        self.sort_combo.setToolTip(tr(
+            "Order of the results.", es="Criterio de orden de los resultados."))
+        self.dir_btn.setToolTip(tr("Reverse the order.", es="Invertir el orden."))
+        self.language_combo.blockSignals(True)
+        index = self.language_combo.findData(get_language())
+        if index >= 0:
+            self.language_combo.setCurrentIndex(index)
+        self.language_combo.blockSignals(False)
+        self.language_combo.setToolTip(tr(
+            "Interface language. Applies immediately.",
+            es="Idioma de la interfaz. Se aplica al momento.",
+        ))
+
+    def _emit_language(self, _index: int) -> None:
+        code = self.language_combo.currentData()
+        if code:
+            self.language_changed.emit(str(code))
 
     def _emit_sort(self) -> None:
         self.sort_changed.emit(

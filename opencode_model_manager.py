@@ -23,12 +23,17 @@ ICON_PATH = Path(__file__).resolve().parent / "omm" / "assets" / "icon.png"
 
 
 def main():
+    from omm.i18n import init_language, tr
+
+    init_language()
     try:
         from PyQt6.QtGui import QIcon
         from PyQt6.QtWidgets import QApplication
     except ImportError:
-        print("ERROR: PyQt6 no está instalado.")
-        print("Instálalo con: pip install PyQt6")
+        print(tr("ERROR: PyQt6 is not installed.",
+                 es="ERROR: PyQt6 no está instalado."))
+        print(tr("Install it with: pip install PyQt6",
+                 es="Instálalo con: pip install PyQt6"))
         sys.exit(1)
 
     from omm.main_window import APP_NAME, OpenCodeModelManager

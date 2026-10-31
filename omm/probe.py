@@ -37,6 +37,7 @@ from dataclasses import dataclass
 from omm.catalog import (
     USER_AGENT, is_local_url, normalize_base_url, resolve_protocol,
 )
+from omm.i18n import tr, trn
 
 PROBE_TIMEOUT_SECONDS = 12
 MAX_BODY_BYTES = 256 * 1024
@@ -81,10 +82,6 @@ KIND_NO_ENV = "no_env"
 ALIVE_KINDS = frozenset({KIND_OK, KIND_AUTH, KIND_RATE_LIMITED})
 
 
-def _plural(count: int, singular: str, plural: str) -> str:
-    return singular if count == 1 else plural
-
-
 # ---------------------------------------------------------------------------
 # Resultado
 # ---------------------------------------------------------------------------
@@ -127,13 +124,19 @@ class ProbeResult:
             parts.append(f"{self.latency_ms} ms")
         if self.models:
             total = len(self.models)
-            parts.append(
-                f"{total} {_plural(total, 'modelo anunciado', 'modelos anunciados')}"
-            )
+            parts.append(trn(
+                total,
+                "{count} model announced", "{count} models announced",
+                es_one="{count} modelo anunciado",
+                es_many="{count} modelos anunciados",
+            ).format(count=total))
         if self.wanted:
-            parts.append(f"tus modelos: {len(self.present)}/{self.wanted}")
+            parts.append(tr(
+                "your models: {present}/{wanted}",
+                es="tus modelos: {present}/{wanted}",
+            ).format(present=len(self.present), wanted=self.wanted))
         if self.missing:
-            parts.append("faltan " + ", ".join(self.missing))
+            parts.append(tr("missing ", es="faltan ") + ", ".join(self.missing))
         return " · ".join(parts)
 
     def report(self) -> str:
@@ -142,7 +145,8 @@ class ProbeResult:
         if self.detail:
             blocks.append(self.detail)
         if self.url:
-            blocks.append(f"Petición: GET {self.url}")
+            blocks.append(tr("Request: GET {url}", es="Petición: GET {url}")
+                          .format(url=self.url))
         return "\n".join(blocks)
 
 
@@ -197,21 +201,28 @@ def unproposable_reason(base_url: str, protocol: str) -> str:
     """
     url = normalize_base_url(base_url)
     if not url:
-        return (
-            "No hay URL que probar: ni opencode.json ni el catálogo "
-            "declaran un baseURL para este proveedor."
+        return tr(
+            "There is no URL to test: neither opencode.json nor the catalog "
+            "declares a baseURL for this provider.",
+            es="No hay URL que probar: ni opencode.json ni el catálogo "
+               "declaran un baseURL para este proveedor.",
         )
     if is_blocked_url(url):
-        return (
-            f"{host_of(url)} es una dirección de metadatos del proveedor de "
-            "nube, no un endpoint de IA. No se contacta."
-        )
+        return tr(
+            "{host} is a cloud metadata address, not an AI endpoint. "
+            "Not contacted.",
+            es="{host} es una dirección de metadatos del proveedor de nube, "
+               "no un endpoint de IA. No se contacta.",
+        ).format(host=host_of(url))
     if protocol not in TESTABLE_PROTOCOLS:
-        return (
-            f"No sé probar el protocolo «{protocol}»: el formato lo decide "
-            "su SDK y un 404 aquí no querría decir nada. Esta prueba sí "
-            "cubre openai, openai-compatible y anthropic."
-        )
+        return tr(
+            "I don't know how to test protocol «{protocol}»: its SDK decides "
+            "the format and a 404 here would mean nothing. This test does "
+            "cover openai, openai-compatible and anthropic.",
+            es="No sé probar el protocolo «{protocol}»: el formato lo decide "
+               "su SDK y un 404 aquí no querría decir nada. Esta prueba sí "
+               "cubre openai, openai-compatible y anthropic.",
+        ).format(protocol=protocol)
     return ""
 
 
@@ -249,22 +260,30 @@ def key_offer(base_url: str, protocol: str, env_names) -> tuple[bool, str]:
     url = normalize_base_url(base_url) or ""
     names = [str(n) for n in env_names or ()]
     if not names:
-        return False, (
-            "Este proveedor no declara ninguna variable de entorno en el "
-            "catálogo: no hay clave que enviar. Las credenciales se ponen "
-            "con /connect."
+        return False, tr(
+            "This provider does not declare any environment variable in the "
+            "catalog: there is no key to send. Credentials are set with "
+            "/connect.",
+            es="Este proveedor no declara ninguna variable de entorno en el "
+               "catálogo: no hay clave que enviar. Las credenciales se ponen "
+               "con /connect.",
         )
     if not first_present_env(names)[0]:
-        return False, (
-            f"{', '.join(names)} no está definida en el entorno de esta "
-            "ventana. Si la exportas en un terminal, hay que relanzar la "
-            "app desde él (o usar /connect)."
-        )
+        return False, tr(
+            "{names} is not defined in this window's environment. If you "
+            "export it in a terminal, relaunch the app from it (or use "
+            "/connect).",
+            es="{names} no está definida en el entorno de esta ventana. Si la "
+               "exportas en un terminal, hay que relanzar la app desde él (o "
+               "usar /connect).",
+        ).format(names=", ".join(names))
     if not key_transport_ok(url):
-        return False, (
-            f"{host_of(url)} contesta por HTTP sin cifrar: no envío tu clave "
-            "en claro. Cambia el baseURL a https:// o prueba en loopback."
-        )
+        return False, tr(
+            "{host} answers over unencrypted HTTP: I won't send your key in "
+            "the clear. Change the baseURL to https:// or test on loopback.",
+            es="{host} contesta por HTTP sin cifrar: no envío tu clave en "
+               "claro. Cambia el baseURL a https:// o prueba en loopback.",
+        ).format(host=host_of(url))
     return True, ""
 
 
@@ -391,30 +410,50 @@ def _classify_exception(exc: Exception, host: str, timeout: float) -> tuple[str,
     reason = exc.reason if isinstance(exc, urllib.error.URLError) else exc
     for candidate in (reason, exc):
         if isinstance(candidate, ssl.SSLError):
-            return KIND_TLS, "El certificado TLS falla", _ssl_reason(candidate)
+            return (
+                KIND_TLS,
+                tr("The TLS certificate fails", es="El certificado TLS falla"),
+                _ssl_reason(candidate),
+            )
         if isinstance(candidate, socket.gaierror):
             return (
                 KIND_DNS,
-                f"{host} no resuelve",
-                "El nombre de dominio no existe o el DNS no responde: "
-                "revisa el baseURL.",
+                tr("{host} does not resolve", es="{host} no resuelve")
+                .format(host=host),
+                tr("The domain name does not exist or DNS is not "
+                   "responding: check the baseURL.",
+                   es="El nombre de dominio no existe o el DNS no responde: "
+                      "revisa el baseURL."),
             )
         if isinstance(candidate, ConnectionRefusedError):
             return (
                 KIND_REFUSED,
-                "Nada escucha en ese puerto",
-                f"{host} ha rechazado la conexión. Si es un servicio local "
-                "(Ollama, LM Studio, llama.cpp), levántalo antes de probar.",
+                tr("Nothing is listening on that port",
+                   es="Nada escucha en ese puerto"),
+                tr("{host} has rejected the connection. If it is a local "
+                   "service (Ollama, LM Studio, llama.cpp), start it before "
+                   "testing.",
+                   es="{host} ha rechazado la conexión. Si es un servicio "
+                      "local (Ollama, LM Studio, llama.cpp), levántalo antes "
+                      "de probar.").format(host=host),
             )
         if isinstance(candidate, (socket.timeout, TimeoutError)):
             return (
                 KIND_TIMEOUT,
-                f"Silencio tras {int(timeout)} s",
-                f"{host} no ha contestado a tiempo. Puede estar caído, o el "
-                "firewall está soltando los paquetes.",
+                tr("Silence after {seconds} s", es="Silencio tras {seconds} s")
+                .format(seconds=int(timeout)),
+                tr("{host} did not answer in time. It may be down, or a "
+                   "firewall is dropping packets.",
+                   es="{host} no ha contestado a tiempo. Puede estar caído, o "
+                      "el firewall está soltando los paquetes.")
+                .format(host=host),
             )
     detail = _first_line(str(reason) or str(exc) or exc.__class__.__name__)
-    return KIND_ERROR, "No se ha podido conectar", f"{host}: {detail}"
+    return (
+        KIND_ERROR,
+        tr("Could not connect", es="No se ha podido conectar"),
+        f"{host}: {detail}",
+    )
 
 
 def _ssl_reason(exc) -> str:
@@ -424,12 +463,17 @@ def _ssl_reason(exc) -> str:
         host = info.get("hostname") or ""
         reason = info.get("reason") or ""
         if host and reason:
-            return (
-                f"El certificado no vale para {host}: {reason}. "
-                "No se ha enviado ninguna credencial."
-            )
+            return tr(
+                "The certificate is not valid for {host}: {reason}. "
+                "No credential was sent.",
+                es="El certificado no vale para {host}: {reason}. "
+                   "No se ha enviado ninguna credencial.",
+            ).format(host=host, reason=reason)
     text = _first_line(str(exc) or exc.__class__.__name__)
-    return f"El certificado no se ha podido verificar: {text}."
+    return tr(
+        "The certificate could not be verified: {text}.",
+        es="El certificado no se ha podido verificar: {text}.",
+    ).format(text=text)
 
 
 def _first_line(text: str) -> str:
@@ -444,50 +488,78 @@ def _from_status(status: int, api_key: str, url: str) -> tuple[str, str, str]:
         if api_key:
             return (
                 KIND_DENIED,
-                "El endpoint existe, pero rechaza tu clave",
-                f"{host} ha contestado {status} con la clave de la variable de "
-                "entorno. Endpoint correcto, credencial inválida o sin permisos.",
+                tr("The endpoint exists, but it rejects your key",
+                   es="El endpoint existe, pero rechaza tu clave"),
+                tr("{host} answered {status} with the key from the "
+                   "environment variable. Correct endpoint, invalid "
+                   "credential or missing permissions.",
+                   es="{host} ha contestado {status} con la clave de la "
+                      "variable de entorno. Endpoint correcto, credencial "
+                      "inválida o sin permisos.")
+                .format(host=host, status=status),
             )
         return (
             KIND_AUTH,
-            "Endpoint vivo: pide credenciales",
-            f"{host} responde {status} en {path} sin clave, que es lo esperado. "
-            "La ruta existe; OpenCode la usará en cuanto pongas la credencial "
-            "con /connect.",
+            tr("Endpoint alive: it asks for credentials",
+               es="Endpoint vivo: pide credenciales"),
+            tr("{host} responds {status} at {path} without a key, which is "
+               "expected. The route exists; OpenCode will use it as soon as "
+               "you set the credential with /connect.",
+               es="{host} responde {status} en {path} sin clave, que es lo "
+                  "esperado. La ruta existe; OpenCode la usará en cuanto "
+                  "pongas la credencial con /connect.")
+            .format(host=host, status=status, path=path),
         )
     if status in (404, 405, 400):
         return (
             KIND_NOT_FOUND,
-            f"No expone {path}",
-            f"El host {host} responde, pero {path} da {status}. Suele ser un "
-            "baseURL al que le falta (o le sobra) el sufijo /v1.",
+            tr("Does not expose {path}", es="No expone {path}").format(path=path),
+            tr("Host {host} responds, but {path} returns {status}. It is "
+               "usually a baseURL missing (or with an extra) /v1 suffix.",
+               es="El host {host} responde, pero {path} da {status}. Suele "
+                  "ser un baseURL al que le falta (o le sobra) el sufijo "
+                  "/v1.").format(host=host, path=path, status=status),
         )
     if status == 429:
         return (
             KIND_RATE_LIMITED,
-            "Vivo, pero saturado (429)",
-            f"{host} ha limitado la petición. El endpoint existe; reintenta "
-            "más tarde.",
+            tr("Alive, but saturated (429)", es="Vivo, pero saturado (429)"),
+            tr("{host} rate-limited the request. The endpoint exists; retry "
+               "later.",
+               es="{host} ha limitado la petición. El endpoint existe; "
+                  "reintenta más tarde.").format(host=host),
         )
     if 500 <= status <= 599:
         return (
             KIND_SERVER,
-            f"El servidor falla ({status})",
-            f"{host} ha respondido con un error de servidor en {path}. "
-            "El nombre y la ruta existen: es un problema de su lado.",
+            tr("The server fails ({status})", es="El servidor falla ({status})")
+            .format(status=status),
+            tr("{host} responded with a server error at {path}. The name and "
+               "route exist: it is a problem on their side.",
+               es="{host} ha respondido con un error de servidor en {path}. "
+                  "El nombre y la ruta existen: es un problema de su lado.")
+            .format(host=host, path=path),
         )
     if 300 <= status <= 399:
         return (
             KIND_REDIRECT,
-            "Redirige fuera de tu baseURL",
-            f"{host} contesta {status}. No seguimos la redirección: "
-            "podría llevar la cabecera de autenticación a otro origen.",
+            tr("Redirects outside your baseURL",
+               es="Redirige fuera de tu baseURL"),
+            tr("{host} answers {status}. We do not follow the redirect: it "
+               "could carry the authentication header to another origin.",
+               es="{host} contesta {status}. No seguimos la redirección: "
+                  "podría llevar la cabecera de autenticación a otro origen.")
+            .format(host=host, status=status),
         )
     return (
         KIND_STATUS,
-        f"Respuesta inesperada ({status})",
-        f"{host} ha contestado {status} a {path}, que no es un resultado "
-        "que esta prueba sepa interpretar.",
+        tr("Unexpected response ({status})",
+           es="Respuesta inesperada ({status})").format(status=status),
+        tr("{host} answered {status} to {path}, which is not a result this "
+           "test knows how to interpret.",
+           es="{host} ha contestado {status} a {path}, que no es un resultado "
+              "que esta prueba sepa interpretar.")
+        .format(host=host, status=status, path=path),
     )
 
 
@@ -546,18 +618,25 @@ def probe_endpoint(
             else KIND_INVALID
         )
         summary = {
-            KIND_BLOCKED: "Endpoint rechazado por seguridad",
-            KIND_UNSUPPORTED: "No sé probar este protocolo",
-            KIND_INVALID: "Sin endpoint que probar",
+            KIND_BLOCKED: tr("Endpoint rejected for security",
+                             es="Endpoint rechazado por seguridad"),
+            KIND_UNSUPPORTED: tr("I don't know how to test this protocol",
+                                 es="No sé probar este protocolo"),
+            KIND_INVALID: tr("No endpoint to test",
+                             es="Sin endpoint que probar"),
         }[kind]
         return _result(kind, summary, reason, url=url, api_key=api_key)
 
     if api_key and not key_transport_ok(url):
         return _result(
             KIND_BLOCKED,
-            "No envío la clave por HTTP sin cifrar",
-            f"{host_of(url)} contesta por http://; tu clave viajaría en claro. "
-            "Pon https:// en el baseURL o prueba sin clave.",
+            tr("I won't send the key over unencrypted HTTP",
+               es="No envío la clave por HTTP sin cifrar"),
+            tr("{host} answers over http://; your key would travel in the "
+               "clear. Set https:// in the baseURL or test without a key.",
+               es="{host} contesta por http://; tu clave viajaría en claro. "
+                  "Pon https:// en el baseURL o prueba sin clave.")
+            .format(host=host_of(url)),
             url=url, env_name=env_name, with_key=True, api_key=api_key,
         )
 
@@ -588,7 +667,10 @@ def probe_endpoint(
             headers = getattr(exc, "headers", None)
             location = host_of((headers.get("Location") if headers else "") or "")
             if location:
-                result.detail += f" El destino es {location}."
+                result.detail += tr(
+                    " The destination is {location}.",
+                    es=" El destino es {location}.",
+                ).format(location=location)
         return result
     except Exception as exc:  # DNS, conexión rehusada, timeout, TLS, proxy…
         return _result(
@@ -611,10 +693,15 @@ def probe_endpoint(
     except (ValueError, UnicodeDecodeError):
         return _result(
             KIND_UNREADABLE,
-            "Responde 200, pero no es JSON",
-            f"{host} ha devuelto {len(body)} bytes que no son una lista de "
-            "modelos legible. El host está vivo; el formato no es el que "
-            "espera este protocolo.",
+            tr("Responds 200, but it is not JSON",
+               es="Responde 200, pero no es JSON"),
+            tr("{host} returned {size} bytes that are not a readable model "
+               "list. The host is alive; the format is not the one this "
+               "protocol expects.",
+               es="{host} ha devuelto {size} bytes que no son una lista de "
+                  "modelos legible. El host está vivo; el formato no es el "
+                  "que espera este protocolo.")
+            .format(host=host, size=len(body)),
             url=target, status=status, latency_ms=latency,
             env_name=env_name, with_key=bool(api_key), api_key=api_key,
         )
@@ -622,10 +709,13 @@ def probe_endpoint(
     if not isinstance(payload, (dict, list)):
         return _result(
             KIND_UNREADABLE,
-            "Respuesta sin forma de catálogo",
-            f"{host} ha contestado un JSON de tipo "
-            f"{type(payload).__name__}: no es un objeto ni una lista de "
-            "modelos.",
+            tr("Response without catalog shape",
+               es="Respuesta sin forma de catálogo"),
+            tr("{host} answered a JSON of type {type}: it is not an object "
+               "or a list of models.",
+               es="{host} ha contestado un JSON de tipo {type}: no es un "
+                  "objeto ni una lista de modelos.")
+            .format(host=host, type=type(payload).__name__),
             url=target, status=status, latency_ms=latency,
             env_name=env_name, with_key=bool(api_key), api_key=api_key,
         )
@@ -635,25 +725,34 @@ def probe_endpoint(
     if not ids:
         return _result(
             KIND_OK,
-            "Endpoint operativo, sin modelos listados",
-            f"{host} ha respondido 200 en la ruta de modelos pero la lista "
-            "viene vacía o con otro formato. La conexión funciona; no hemos "
-            "podido comprobar qué modelos ofrece.",
+            tr("Endpoint working, no models listed",
+               es="Endpoint operativo, sin modelos listados"),
+            tr("{host} responded 200 on the models route but the list is "
+               "empty or in another format. The connection works; we could "
+               "not check which models it offers.",
+               es="{host} ha respondido 200 en la ruta de modelos pero la "
+                  "lista viene vacía o con otro formato. La conexión "
+                  "funciona; no hemos podido comprobar qué modelos ofrece.")
+            .format(host=host),
             url=target, status=status, latency_ms=latency,
             env_name=env_name, with_key=bool(api_key), present=present,
             missing=missing, api_key=api_key,
         )
-    detail = (
-        f"{host} responde {len(ids)} "
-        f"{_plural(len(ids), 'modelo', 'modelos')} en la ruta de modelos."
+    models_word = trn(
+        len(ids), "model", "models", es_one="modelo", es_many="modelos",
     )
+    detail = tr(
+        "{host} responds {count} {models} on the models route.",
+        es="{host} responde {count} {models} en la ruta de modelos.",
+    ).format(host=host, count=len(ids), models=models_word)
     if missing:
-        detail += (
-            " Ojo: " + ", ".join(missing) + " no aparece entre los anunciados."
-        )
+        detail += tr(
+            " Warning: {missing} does not appear among the announced ones.",
+            es=" Ojo: {missing} no aparece entre los anunciados.",
+        ).format(missing=", ".join(missing))
     return _result(
         KIND_OK,
-        "Endpoint operativo",
+        tr("Endpoint working", es="Endpoint operativo"),
         detail,
         url=target, status=status, latency_ms=latency, models=ids,
         present=present, missing=missing, env_name=env_name,

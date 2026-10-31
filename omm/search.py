@@ -15,6 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 
 from omm.catalog import ModelEntry, ProviderEntry
+from omm.i18n import tr
 
 # Ámbito de proveedores.
 SCOPE_ALL = "all"
@@ -77,25 +78,25 @@ class Filters:
         """Descripción compacta de los filtros activos (para la barra de estado)."""
         parts: list[str] = []
         if self.scope == SCOPE_CONFIGURED:
-            parts.append("registrados en OpenCode")
+            parts.append(tr("registered in OpenCode", es="registrados en OpenCode"))
         elif self.scope == SCOPE_UNCONFIGURED:
-            parts.append("sin registrar")
+            parts.append(tr("unregistered", es="sin registrar"))
         if self.protocol == PROTOCOL_OTHER:
-            parts.append("otros protocolos")
+            parts.append(tr("other protocols", es="otros protocolos"))
         elif self.protocol != PROTOCOL_ANY:
             parts.append(self.protocol)
         if self.local_only:
-            parts.append("local")
+            parts.append(tr("local", es="local"))
         flags = {
-            "gratis": self.free,
-            "de pago": self.paid,
-            "con nivel gratis": self.free_tier,
-            "de código": self.coding,
-            "razonamiento": self.reasoning,
-            "visión": self.vision,
-            "tool calling": self.tools,
-            "multimodal": self.multimodal,
-            "contexto ≥ 200k": self.large_context,
+            tr("free", es="gratis"): self.free,
+            tr("paid", es="de pago"): self.paid,
+            tr("with free tier", es="con nivel gratis"): self.free_tier,
+            tr("coding", es="de código"): self.coding,
+            tr("reasoning", es="razonamiento"): self.reasoning,
+            tr("vision", es="visión"): self.vision,
+            tr("tool calling", es="tool calling"): self.tools,
+            tr("multimodal", es="multimodal"): self.multimodal,
+            tr("context ≥ 200k", es="contexto ≥ 200k"): self.large_context,
         }
         parts.extend(name for name, on in flags.items() if on)
         return " · ".join(parts)

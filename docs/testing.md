@@ -6,7 +6,7 @@
 python3 -m unittest discover -s tests -v
 ```
 
-**344 tests** in two layers, in under ten seconds:
+**357 tests** in two layers, in under ten seconds:
 
 - **Headless with a stub** (`tests/qt_stub.py`): window, panel and dialog
   logic runs without PyQt6, without windows and without touching your real
@@ -53,6 +53,12 @@ python3 -m unittest discover -s tests -v
   one runs. The security constraints are also tested: `auth.json`
   identical byte for byte, no key written and searching registers
   nothing.
+- **Language** (`tests/test_i18n.py`): English is the default; Spanish
+  lookup, plurals and locale number separators; precedence `OMM_LANG` >
+  saved choice > English; live retranslation of the header, the filter
+  panel and the Save button without losing the search text or the checked
+  filters; and persistence of the choice in `QSettings`. The legacy suites
+  run with `OMM_LANG=es`, so their Spanish assertions stay meaningful.
 - **Real Qt** (`tests/test_app_launch.py`): launches the real application
   with `QT_QPA_PLATFORM=offscreen` on a temporary HOME, pumps the event
   loop until the `QThread` publishes the cache and runs search → filter →

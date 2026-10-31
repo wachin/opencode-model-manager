@@ -43,6 +43,9 @@ sys.path.insert(0, str(ROOT))
 # La ventana vive ahora en omm.main_window; el script raíz solo arranca
 # la aplicación y se comprueba por separado.
 import omm.main_window as omm  # noqa: E402
+from omm.i18n import set_language  # noqa: E402
+
+set_language("es")
 
 entry_spec = importlib.util.spec_from_file_location(
     "opencode_model_manager_entry", ROOT / "opencode_model_manager.py"

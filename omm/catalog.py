@@ -29,6 +29,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
+from omm.i18n import tr, trn
+
 MODELS_DEV_URL = "https://models.dev/api.json"
 MODELS_DEV_LICENSE = "MIT (sst/models.dev)"
 CATALOG_APP = "opencode-model-manager"
@@ -43,7 +45,7 @@ PROTOCOL_LABELS = {
     "google": "Google (Gemini)",
     "azure": "Azure OpenAI",
     "bedrock": "AWS Bedrock",
-    "other": "Otro / específico del SDK",
+    "other": "Other / SDK-specific",
 }
 
 NPM_TO_PROTOCOL = {
@@ -540,7 +542,10 @@ class CatalogStore:
                 body = gzip.GzipFile(fileobj=io.BytesIO(body)).read()
         payload = json.loads(body.decode("utf-8"))
         if not isinstance(payload, dict):
-            raise ValueError("Models.dev no devolvió un objeto JSON")
+            raise ValueError(tr(
+                "Models.dev did not return a JSON object.",
+                es="Models.dev no devolvió un objeto JSON",
+            ))
         return payload
 
     def refresh(self, url: str = MODELS_DEV_URL, timeout: int = FETCH_TIMEOUT_SECONDS) -> int:
@@ -594,7 +599,7 @@ class CatalogStore:
         return self.providers.get(provider_id)
 
     def describe_source(self) -> str:
-        stamp = "desconocida"
+        stamp = tr("unknown", es="desconocida")
         if self.last_updated:
             try:
                 stamp = datetime.fromisoformat(self.last_updated).strftime(
@@ -602,8 +607,20 @@ class CatalogStore:
                 )
             except ValueError:
                 stamp = self.last_updated
-        return (
-            f"Catálogo: {len(self.providers)} proveedores / "
-            f"{self.model_count} modelos · "
-            f"última actualización: {stamp} · fuentes: semilla + models.dev ({MODELS_DEV_LICENSE})"
+        providers = trn(len(self.providers), "{count} provider",
+                        "{count} providers", es_one="{count} proveedor",
+                        es_many="{count} proveedores")
+        models = trn(self.model_count, "{count} model", "{count} models",
+                     es_one="{count} modelo", es_many="{count} modelos")
+        template = tr(
+            "Catalog: {providers} / {models} · last update: {stamp} · "
+            "sources: seed + models.dev ({license})",
+            es="Catálogo: {providers} / {models} · última actualización: "
+               "{stamp} · fuentes: semilla + models.dev ({license})",
+        )
+        return template.format(
+            providers=providers.format(count=len(self.providers)),
+            models=models.format(count=self.model_count),
+            stamp=stamp,
+            license=MODELS_DEV_LICENSE,
         )

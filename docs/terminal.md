@@ -3,8 +3,9 @@
 [Back to the README](../README.md)
 
 Install, launch and verify the app from a terminal, including a headless
-check for SSH or CI. The app's interface stays in Spanish: these are
-translated instructions, not translated buttons.
+check for SSH or CI. The app is bilingual (English by default, Spanish
+from the header selector); these are translated instructions, not
+translated buttons.
 
 ---
 
@@ -62,7 +63,7 @@ Run the test suite:
 python3 -m unittest discover -s tests
 ```
 
-Expected: `Ran 344 tests ... OK`. Without PyQt6 the single real-Qt file is
+Expected: `Ran 357 tests ... OK`. Without PyQt6 the single real-Qt file is
 skipped; everything else runs headless.
 
 | Symptom | Fix |
@@ -128,7 +129,7 @@ Execute a suíte de testes:
 python3 -m unittest discover -s tests
 ```
 
-Esperado: `Ran 344 tests ... OK`. Sem PyQt6, o único arquivo com Qt real é
+Esperado: `Ran 357 tests ... OK`. Sem PyQt6, o único arquivo com Qt real é
 ignorado; o restante roda sem tela.
 
 | Sintoma | Solução |

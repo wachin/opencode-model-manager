@@ -22,9 +22,20 @@ from PyQt6.QtWidgets import (
 )
 
 from omm.catalog import PROTOCOL_LABELS, normalize_base_url, resolve_protocol
+from omm.i18n import tr
 from omm.registry import validate_provider_spec
 
 DEFAULT_NPM = "@ai-sdk/openai-compatible"
+
+PROTOCOL_LABELS_ES = {
+    "openai-compatible": "OpenAI-compatible (/v1/chat/completions)",
+    "openai": "OpenAI",
+    "anthropic": "Anthropic (Messages)",
+    "google": "Google (Gemini)",
+    "azure": "Azure OpenAI",
+    "bedrock": "AWS Bedrock",
+    "other": "Otro / específico del SDK",
+}
 
 PROTOCOL_DEFAULT_NPM = {
     "openai-compatible": "@ai-sdk/openai-compatible",
@@ -63,7 +74,10 @@ class ProviderDialog(QDialog):
     ):
         super().__init__(parent)
         self.editing = provider_data is not None
-        self.setWindowTitle("Editar proveedor" if self.editing else "Agregar proveedor")
+        self.setWindowTitle(
+            tr("Edit provider", es="Editar proveedor") if self.editing
+            else tr("Add provider", es="Agregar proveedor")
+        )
         self.setMinimumWidth(680)
         self._existing_ids = set(existing_ids)
         self._provider_data = dict(provider_data or {})
@@ -79,14 +93,18 @@ class ProviderDialog(QDialog):
         form.setSpacing(8)
 
         self.id_edit = QLineEdit(provider_id)
-        self.id_edit.setPlaceholderText("Ej.: bai  (debe coincidir con el ID usado en /connect)")
+        self.id_edit.setPlaceholderText(tr(
+            "e.g. bai  (must match the ID used in /connect)",
+            es="Ej.: bai  (debe coincidir con el ID usado en /connect)",
+        ))
         if self.editing:
             self.id_edit.setReadOnly(True)
-        form.addRow("ID del proveedor *", self.id_edit)
+        form.addRow(tr("Provider ID *", es="ID del proveedor *"), self.id_edit)
 
         self.name_edit = QLineEdit(str(self._provider_data.get("name", provider_id)))
-        self.name_edit.setPlaceholderText("Nombre visible en OpenCode")
-        form.addRow("Nombre visible *", self.name_edit)
+        self.name_edit.setPlaceholderText(tr(
+            "Name shown in OpenCode", es="Nombre visible en OpenCode"))
+        form.addRow(tr("Display name *", es="Nombre visible *"), self.name_edit)
 
         options = self._provider_data.get("options")
         options = options if isinstance(options, dict) else {}
@@ -96,7 +114,7 @@ class ProviderDialog(QDialog):
 
         self.protocol_combo = QComboBox()
         for key, label in PROTOCOL_LABELS.items():
-            self.protocol_combo.addItem(label, key)
+            self.protocol_combo.addItem(tr(label, es=PROTOCOL_LABELS_ES.get(key)), key)
         current_protocol = resolve_protocol(
             str(self._provider_data.get("npm", "")),
             str(options.get("baseURL", "")) or None,
@@ -104,12 +122,14 @@ class ProviderDialog(QDialog):
         idx = self.protocol_combo.findData(current_protocol)
         if idx >= 0:
             self.protocol_combo.setCurrentIndex(idx)
-        self.protocol_combo.setToolTip(
-            "Define qué adapter del AI SDK se usará. «OpenAI-compatible» sirve\n"
-            "para la mayoría de APIs externas (/v1/chat/completions)."
-        )
+        self.protocol_combo.setToolTip(tr(
+            "Defines which AI SDK adapter will be used. “OpenAI-compatible” "
+            "works for most external APIs (/v1/chat/completions).",
+            es="Define qué adapter del AI SDK se usará. «OpenAI-compatible» "
+               "sirve para la mayoría de APIs externas (/v1/chat/completions).",
+        ))
         self.protocol_combo.currentIndexChanged.connect(self._protocol_changed)
-        form.addRow("Protocolo de API", self.protocol_combo)
+        form.addRow(tr("API protocol", es="Protocolo de API"), self.protocol_combo)
 
         self.npm_edit = QComboBox()
         self.npm_edit.setEditable(True)
@@ -117,31 +137,43 @@ class ProviderDialog(QDialog):
         self.npm_edit.setCurrentText(
             str(self._provider_data.get("npm", DEFAULT_NPM))
         )
-        self.npm_edit.setToolTip("Paquete AI SDK que instalará/invocará OpenCode.")
-        form.addRow("Paquete AI SDK (npm)", self.npm_edit)
+        self.npm_edit.setToolTip(tr(
+            "AI SDK package that OpenCode will install/invoke.",
+            es="Paquete AI SDK que instalará/invocará OpenCode.",
+        ))
+        form.addRow(tr("AI SDK package (npm)", es="Paquete AI SDK (npm)"),
+                    self.npm_edit)
 
         env_list = self._provider_data.get("env")
         env_first = ""
         if isinstance(env_list, list) and env_list:
             env_first = str(env_list[0])
         self.env_edit = QLineEdit(env_first)
-        self.env_edit.setPlaceholderText("Ej.: MYPROVIDER_API_KEY (nombre de variable; vacío = /connect)")
-        self.env_edit.setToolTip(
-            "OpenCode tomará la API key de esta variable de entorno o de\n"
-            "/connect. Este diálogo NUNCA pide ni guarda claves."
-        )
-        form.addRow("Variable de entorno para la API key", self.env_edit)
+        self.env_edit.setPlaceholderText(tr(
+            "e.g. MYPROVIDER_API_KEY (variable name; empty = /connect)",
+            es="Ej.: MYPROVIDER_API_KEY (nombre de variable; vacío = /connect)",
+        ))
+        self.env_edit.setToolTip(tr(
+            "OpenCode will take the API key from this environment variable "
+            "or from /connect. This dialog NEVER asks for or stores keys.",
+            es="OpenCode tomará la API key de esta variable de entorno o de "
+               "/connect. Este diálogo NUNCA pide ni guarda claves.",
+        ))
+        form.addRow(tr("Environment variable for the API key",
+                       es="Variable de entorno para la API key"), self.env_edit)
 
         headers = options.get("headers")
         header_text = ""
         if isinstance(headers, dict):
             header_text = "\n".join(f"{k}: {v}" for k, v in headers.items())
         self.headers_edit = QPlainTextEdit(header_text)
-        self.headers_edit.setPlaceholderText(
-            "Opcional, una cabecera por línea — Cabecera: valor"
-        )
+        self.headers_edit.setPlaceholderText(tr(
+            "Optional, one header per line — Header: value",
+            es="Opcional, una cabecera por línea — Cabecera: valor",
+        ))
         self.headers_edit.setFixedHeight(72)
-        form.addRow("Cabeceras HTTP personalizadas", self.headers_edit)
+        form.addRow(tr("Custom HTTP headers", es="Cabeceras HTTP personalizadas"),
+                    self.headers_edit)
 
         self.models_edit = QPlainTextEdit()
         existing_models = self._provider_data.get("models")
@@ -150,30 +182,38 @@ class ProviderDialog(QDialog):
                 f"{mid}|{mdata.get('name')}" if isinstance(mdata, dict) and mdata.get("name") else mid
                 for mid, mdata in existing_models.items()
             ))
-        self.models_edit.setPlaceholderText(
-            "Opcional. ID de modelo por línea; nombre con «id|Nombre»."
-        )
+        self.models_edit.setPlaceholderText(tr(
+            "Optional. Model ID per line; name with “id|Name”.",
+            es="Opcional. ID de modelo por línea; nombre con «id|Nombre».",
+        ))
         self.models_edit.setFixedHeight(84)
-        form.addRow("Modelos iniciales", self.models_edit)
+        form.addRow(tr("Initial models", es="Modelos iniciales"), self.models_edit)
 
-        note = QLabel(
-            "Las credenciales se gestionan aparte: usa /connect en OpenCode o la\n"
-            "variable de entorno indicada. Esta herramienta no lee auth.json."
-        )
+        note = QLabel(tr(
+            "Credentials are managed separately: use /connect in OpenCode or "
+            "the environment variable above. This tool does not read auth.json.",
+            es="Las credenciales se gestionan aparte: usa /connect en OpenCode "
+               "o la variable de entorno indicada. Esta herramienta no lee "
+               "auth.json.",
+        ))
         note.setObjectName("mutedLabel")
         note.setWordWrap(True)
         form.addRow(note)
-        self.tabs.addTab(form_widget, "Formulario")
+        self.tabs.addTab(form_widget, tr("Form", es="Formulario"))
 
         # ---- pestaña Importar JSON ----
         import_widget = QWidget()
         import_layout = QVBoxLayout(import_widget)
         import_layout.setContentsMargins(14, 14, 14, 8)
-        info = QLabel(
-            "Pega un JSON de proveedor (bloque `\"provider\": { \"<id>\": … }` de\n"
-            "opencode.json, o el objeto del proveedor directamente con \"id\").\n"
-            "Se valida antes de aceptarlo; nada se instala ni se ejecuta."
-        )
+        info = QLabel(tr(
+            "Paste a provider JSON (the `\"provider\": { \"<id>\": … }` block of "
+            "opencode.json, or the provider object directly with \"id\").\n"
+            "It is validated before being accepted; nothing is installed or run.",
+            es="Pega un JSON de proveedor (bloque `\"provider\": { \"<id>\": … }` "
+               "de opencode.json, o el objeto del proveedor directamente con "
+               "\"id\").\nSe valida antes de aceptarlo; nada se instala ni se "
+               "ejecuta.",
+        ))
         info.setObjectName("mutedLabel")
         import_layout.addWidget(info)
         self.json_edit = QPlainTextEdit()
@@ -182,9 +222,9 @@ class ProviderDialog(QDialog):
         self.json_edit.setFont(mono)
         import_layout.addWidget(self.json_edit)
         btns = QHBoxLayout()
-        self.validate_btn = QPushButton("Validar")
+        self.validate_btn = QPushButton(tr("Validate", es="Validar"))
         self.validate_btn.clicked.connect(self._validate_import)
-        self.apply_btn = QPushButton("Aplicar al formulario")
+        self.apply_btn = QPushButton(tr("Apply to form", es="Aplicar al formulario"))
         self.apply_btn.setEnabled(False)
         self.apply_btn.clicked.connect(self._apply_import)
         btns.addWidget(self.validate_btn)
@@ -196,7 +236,7 @@ class ProviderDialog(QDialog):
         self.import_msg.setObjectName("mutedLabel")
         import_layout.addWidget(self.import_msg)
         self._imported: dict | None = None
-        self.tabs.addTab(import_widget, "Importar JSON")
+        self.tabs.addTab(import_widget, tr("Import JSON", es="Importar JSON"))
 
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok
@@ -214,37 +254,44 @@ class ProviderDialog(QDialog):
     def _validate_import(self) -> None:
         text = self.json_edit.toPlainText().strip()
         if not text:
-            self.import_msg.setText("Pega primero un JSON.")
+            self.import_msg.setText(tr("Paste a JSON first.",
+                                       es="Pega primero un JSON."))
             self._imported = None
             self.apply_btn.setEnabled(False)
             return
         try:
             payload = json.loads(text)
         except ValueError as exc:
-            self.import_msg.setText(f"JSON inválido: {exc}")
+            self.import_msg.setText(tr(
+                "Invalid JSON: {error}", es="JSON inválido: {error}"
+            ).format(error=exc))
             self._imported = None
             self.apply_btn.setEnabled(False)
             return
         spec = _spec_from_payload(payload)
         if spec is None:
-            self.import_msg.setText(
-                "No se reconoció un proveedor: usa {\"id\": …} directo o\n"
-                "{\"<pid>\": {…}} / {\"provider\": {\"<pid>\": {…}}}."
-            )
+            self.import_msg.setText(tr(
+                "No provider was recognized: use {\"id\": …} directly or\n"
+                "{\"<pid>\": {…}} / {\"provider\": {\"<pid>\": {…}}}.",
+                es="No se reconoció un proveedor: usa {\"id\": …} directo o\n"
+                   "{\"<pid>\": {…}} / {\"provider\": {\"<pid>\": {…}}}.",
+            ))
             self._imported = None
             self.apply_btn.setEnabled(False)
             return
         errors = validate_provider_spec(spec)
         if errors:
-            self.import_msg.setText("Errores:\n• " + "\n• ".join(errors))
+            self.import_msg.setText(tr("Errors:\n• ", es="Errores:\n• ")
+                                    + "\n• ".join(errors))
             self._imported = None
             self.apply_btn.setEnabled(False)
             return
         self._imported = spec
-        self.import_msg.setText(
-            f"Válido: «{spec['id']}» con "
-            f"{len(spec.get('models') or {}) } modelo(s)."
-        )
+        count = len(spec.get("models") or {})
+        self.import_msg.setText(tr(
+            "Valid: “{id}” with {count} model(s).",
+            es="Válido: «{id}» con {count} modelo(s).",
+        ).format(id=spec["id"], count=count))
         self.apply_btn.setEnabled(True)
 
     def _apply_import(self) -> None:
@@ -280,11 +327,15 @@ class ProviderDialog(QDialog):
         spec = self.get_spec()
         errors = self.errors_for(spec)
         if spec["id"] and not self.editing and spec["id"] in self._existing_ids:
-            errors.append(f"Ya existe un proveedor registrado con el ID «{spec['id']}».")
+            errors.append(tr(
+                "A provider with ID “{id}” is already registered.",
+                es="Ya existe un proveedor registrado con el ID «{id}».",
+            ).format(id=spec["id"]))
         if errors:
             QMessageBox.warning(
-                self, "Validación",
-                "Revisa la definición:\n\n• " + "\n• ".join(errors),
+                self, tr("Validation", es="Validación"),
+                tr("Check the definition:\n\n• ",
+                   es="Revisa la definición:\n\n• ") + "\n• ".join(errors),
             )
             return
         self.accept()
@@ -298,7 +349,10 @@ class ProviderDialog(QDialog):
             if not line:
                 continue
             if ":" not in line:
-                header_errors.append(f"Cabecera sin «: » → {line!r}")
+                header_errors.append(tr(
+                    "Header without “: ” → {line}",
+                    es="Cabecera sin «: » → {line}",
+                ).format(line=repr(line)))
                 continue
             key, _, value = line.partition(":")
             headers[key.strip()] = value.strip()
@@ -339,9 +393,13 @@ class ProviderDialog(QDialog):
         errors.extend(validate_provider_spec(spec))
         base = normalize_base_url(spec.get("baseURL", ""))
         if not base:
-            errors.append("La Base URL es obligatoria y debe ser http(s) válida.")
+            errors.append(tr(
+                "The Base URL is required and must be a valid http(s) URL.",
+                es="La Base URL es obligatoria y debe ser http(s) válida.",
+            ))
         if not spec.get("name"):
-            errors.append("El nombre visible es obligatorio.")
+            errors.append(tr("The display name is required.",
+                             es="El nombre visible es obligatorio."))
         return errors
 
 
@@ -351,7 +409,10 @@ class ModelDialog(QDialog):
     def __init__(self, parent=None, model_id="", model_data=None, existing_ids=None):
         super().__init__(parent)
         from copy import deepcopy
-        self.setWindowTitle("Editar modelo" if model_data is not None else "Agregar modelo")
+        self.setWindowTitle(
+            tr("Edit model", es="Editar modelo") if model_data is not None
+            else tr("Add model", es="Agregar modelo")
+        )
         self.setMinimumWidth(640)
         model_data = deepcopy(model_data) if isinstance(model_data, dict) else {}
         self._original = model_data
@@ -362,37 +423,47 @@ class ModelDialog(QDialog):
         form = QFormLayout()
 
         self.id_edit = QLineEdit(model_id)
-        self.id_edit.setPlaceholderText("Ej.: deepseek-v4-flash")
-        form.addRow("ID del modelo *", self.id_edit)
+        self.id_edit.setPlaceholderText(tr("e.g. deepseek-v4-flash",
+                                           es="Ej.: deepseek-v4-flash"))
+        form.addRow(tr("Model ID *", es="ID del modelo *"), self.id_edit)
 
         name = str(model_data.get("name") or model_id)
         self.name_edit = QLineEdit(name)
-        self.name_edit.setPlaceholderText("Nombre visible en /models")
-        form.addRow("Nombre visible *", self.name_edit)
+        self.name_edit.setPlaceholderText(tr("Name shown in /models",
+                                             es="Nombre visible en /models"))
+        form.addRow(tr("Display name *", es="Nombre visible *"), self.name_edit)
 
         self.modelid_edit = QLineEdit(str(model_data.get("modelID", "") or ""))
-        self.modelid_edit.setPlaceholderText("Opcional: ID real enviado al proveedor")
-        self.modelid_edit.setToolTip(
-            "«modelID» mapea la clave local a otro ID enviado al proveedor.\n"
-            "Normalmente déjalo vacío."
-        )
+        self.modelid_edit.setPlaceholderText(tr(
+            "Optional: real ID sent to the provider",
+            es="Opcional: ID real enviado al proveedor",
+        ))
+        self.modelid_edit.setToolTip(tr(
+            "“modelID” maps the local key to another ID sent to the provider.\n"
+            "Normally leave it empty.",
+            es="«modelID» mapea la clave local a otro ID enviado al proveedor.\n"
+               "Normalmente déjalo vacío.",
+        ))
         form.addRow("modelID", self.modelid_edit)
 
         limit = model_data.get("limit") if isinstance(model_data.get("limit"), dict) else {}
         self.ctx_edit = QLineEdit(str(limit.get("context", "") or ""))
-        self.ctx_edit.setPlaceholderText("Ej.: 128000")
-        form.addRow("Contexto (tokens)", self.ctx_edit)
+        self.ctx_edit.setPlaceholderText(tr("e.g. 128000", es="Ej.: 128000"))
+        form.addRow(tr("Context (tokens)", es="Contexto (tokens)"), self.ctx_edit)
 
         self.out_edit = QLineEdit(str(limit.get("output", "") or ""))
-        self.out_edit.setPlaceholderText("Ej.: 8192")
-        form.addRow("Salida máx. (tokens)", self.out_edit)
+        self.out_edit.setPlaceholderText(tr("e.g. 8192", es="Ej.: 8192"))
+        form.addRow(tr("Max output (tokens)", es="Salida máx. (tokens)"),
+                    self.out_edit)
 
         root.addLayout(form)
 
-        note = QLabel(
-            "Se conservan el resto de propiedades del modelo (cost, options,\n"
-            "headers, variants…). No se tocan credenciales."
-        )
+        note = QLabel(tr(
+            "The rest of the model properties (cost, options, headers, "
+            "variants…) are preserved. Credentials are not touched.",
+            es="Se conservan el resto de propiedades del modelo (cost, "
+               "options, headers, variants…). No se tocan credenciales.",
+        ))
         note.setObjectName("mutedLabel")
         note.setWordWrap(True)
         root.addWidget(note)
@@ -411,10 +482,15 @@ class ModelDialog(QDialog):
         try:
             value = int(text.replace("_", "").replace(" ", ""))
         except ValueError:
-            errors.append(f"«{label}» debe ser un número de tokens: {text!r}")
+            errors.append(tr(
+                "“{label}” must be a token count: {text}",
+                es="«{label}» debe ser un número de tokens: {text}",
+            ).format(label=label, text=repr(text)))
             return None
         if value <= 0:
-            errors.append(f"«{label}» debe ser mayor que 0.")
+            errors.append(tr("“{label}” must be greater than 0.",
+                             es="«{label}» debe ser mayor que 0.")
+                          .format(label=label))
             return None
         return value
 
@@ -422,21 +498,26 @@ class ModelDialog(QDialog):
         errors: list[str] = []
         model_id = self.id_edit.text().strip()
         if not model_id:
-            errors.append("El ID del modelo es obligatorio.")
+            errors.append(tr("The model ID is required.",
+                             es="El ID del modelo es obligatorio."))
         if not self.name_edit.text().strip():
-            errors.append("El nombre visible es obligatorio.")
-        self._numeric(self.ctx_edit, "Contexto", errors)
-        self._numeric(self.out_edit, "Salida máx.", errors)
+            errors.append(tr("The display name is required.",
+                             es="El nombre visible es obligatorio."))
+        self._numeric(self.ctx_edit, tr("Context", es="Contexto"), errors)
+        self._numeric(self.out_edit, tr("Max output", es="Salida máx."), errors)
         if errors:
-            QMessageBox.warning(self, "Validación", "\n".join(f"• {e}" for e in errors))
+            QMessageBox.warning(
+                self, tr("Validation", es="Validación"),
+                "\n".join(f"• {e}" for e in errors),
+            )
             return
         self.accept()
 
     def get_data(self) -> tuple[str, str, str, dict]:
         """(model_id, name, modelID, limit) — limit puede venir vacío."""
         limit: dict[str, int] = {}
-        ctx = self._numeric(self.ctx_edit, "Contexto", [])
-        out = self._numeric(self.out_edit, "Salida máx.", [])
+        ctx = self._numeric(self.ctx_edit, tr("Context", es="Contexto"), [])
+        out = self._numeric(self.out_edit, tr("Max output", es="Salida máx."), [])
         if ctx:
             limit["context"] = ctx
         if out:
@@ -454,7 +535,8 @@ class PreviewDialog(QDialog):
 
     def __init__(self, parent=None, data: dict | None = None, path_note: str = ""):
         super().__init__(parent)
-        self.setWindowTitle("Vista previa de opencode.json")
+        self.setWindowTitle(tr("opencode.json preview",
+                               es="Vista previa de opencode.json"))
         self.resize(760, 640)
         root = QVBoxLayout(self)
         if path_note:
@@ -471,7 +553,10 @@ class PreviewDialog(QDialog):
                 json.dumps(data or {}, indent=2, ensure_ascii=False)
             )
         except (TypeError, ValueError) as exc:
-            self.view.setPlainText(f"(no serializable: {exc})")
+            self.view.setPlainText(tr(
+                "(not serializable: {error})",
+                es="(no serializable: {error})",
+            ).format(error=exc))
         root.addWidget(self.view)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
         buttons.rejected.connect(self.reject)
